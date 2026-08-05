@@ -1,0 +1,7 @@
+name = "metalcut-vision"
+main = "index.js"
+compatibility_date = "2024-11-01"
+
+# После деплоя воркер будет доступен по адресу вида:
+#   https://metalcut-vision.<ваш-акк>.workers.dev
+# Впишите этот адрес в index.html (переменная RECOGNIZE_URL).

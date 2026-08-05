@@ -91,6 +91,19 @@ input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
 .addrow:hover{border-color:var(--accent);color:var(--ink)}
 .calc{width:100%;margin-top:16px;padding:14px;font-size:15.5px;justify-content:center}
 .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+.photo-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;
+  cursor:pointer;font-size:14.5px;background:var(--bg);border-style:dashed}
+.photo-btn:active{transform:scale(.99)}
+#visionStatus{margin-top:10px}
+.vs-row{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink2);padding:8px 10px;
+  border-radius:9px;background:var(--bg);border:1px solid var(--line)}
+.vs-row.err{background:#fdecec;border-color:#f3bcbc;color:#8d2020}
+@media (prefers-color-scheme:dark){.vs-row.err{background:#3a1a1a;border-color:#6b2d2d;color:#f3b9b9}}
+.vs-spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);
+  flex:none;animation:vsspin .8s linear infinite}
+@keyframes vsspin{to{transform:rotate(360deg)}}
+.vs-thumb{width:34px;height:34px;border-radius:7px;object-fit:cover;flex:none;border:1px solid var(--line)}
+.vs-ok{color:var(--green);font-weight:600}
 .err{background:#fdecec;border:1px solid #f3bcbc;color:#8d2020;border-radius:9px;padding:10px 12px;font-size:13px;margin-top:12px}
 @media (prefers-color-scheme:dark){.err{background:#3a1a1a;border-color:#6b2d2d;color:#f3b9b9}}
 
@@ -281,6 +294,16 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
         <div id="rows"></div>
       </div>
       <button class="addrow" id="addRow">+ Добавить деталь</button>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><i>✳</i><h3>Фото эскиза</h3></div>
+      <label class="btn photo-btn" for="photoInput">
+        📷&nbsp; Сфотографировать или загрузить чертёж
+      </label>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none">
+      <p class="hint" style="margin-top:8px">Снимите лист бумаги с нарисованным раскроем или со списком «размер листа + детали» — поля ниже заполнятся автоматически. Фото уходит на распознавание через защищённый прокси, ключ доступа на устройстве не хранится.</p>
+      <div id="visionStatus"></div>
     </div>
 
     <button class="btn primary calc" id="btnCalc">Рассчитать раскрой &nbsp;→</button>
@@ -904,6 +927,109 @@ function a2hsTip(){
   el.querySelector('button').onclick = ()=>{ el.classList.remove('show'); localStorage.setItem('metalcut:a2hs','1'); };
 }
 
+/* ============================================================
+   РАСПОЗНАВАНИЕ ФОТО ЭСКИЗА (через прокси-воркер, ключ не в браузере)
+   ============================================================ */
+// Впишите сюда адрес своего Cloudflare Worker после деплоя, например:
+// 'https://metalcut-vision.ваш-акк.workers.dev'
+const RECOGNIZE_URL = 'https://metalcut-vision.amuravschi-cloud.workers.dev';
+
+function vsSet(html){ $('#visionStatus').innerHTML = html; }
+
+// Сжимаем фото на устройстве до разумного размера перед отправкой —
+// быстрее грузится и дешевле распознавание.
+function compressImage(file, maxSide = 1600, quality = 0.85){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width: w, height: h } = img;
+      if (w > maxSide || h > maxSide) {
+        const s = maxSide / Math.max(w, h);
+        w = Math.round(w * s); h = Math.round(h * s);
+      }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); // на случай прозрачного PNG
+      ctx.drawImage(img, 0, 0, w, h);
+      c.toBlob(blob => {
+        if (!blob) return reject(new Error('canvas_toblob_failed'));
+        const r = new FileReader();
+        r.onload = () => resolve({ dataUrl: r.result, blob });
+        r.onerror = reject;
+        r.readAsDataURL(blob);
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image_load_failed')); };
+    img.src = url;
+  });
+}
+
+async function recognizeSketch(file){
+  if(!RECOGNIZE_URL){
+    vsSet(`<div class="vs-row err">Распознавание ещё не подключено — впишите адрес воркера в код (RECOGNIZE_URL).</div>`);
+    return;
+  }
+  let thumb = '';
+  try{
+    vsSet(`<div class="vs-row"><span class="vs-spin"></span> Сжимаем фото…</div>`);
+    const { dataUrl, blob } = await compressImage(file);
+    thumb = dataUrl;
+    const base64 = dataUrl.split(',')[1];
+
+    vsSet(`<div class="vs-row"><img class="vs-thumb" src="${thumb}"><span><span class="vs-spin" style="display:inline-block;vertical-align:-2px;margin-right:6px"></span>Распознаём эскиз…</span></div>`);
+
+    const res = await fetch(RECOGNIZE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64, mime: 'image/jpeg' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || data.error){
+      const msg = {
+        origin_not_allowed: 'Домен страницы не в списке разрешённых на воркере.',
+        image_too_large: 'Фото слишком большое даже после сжатия.',
+        server_not_configured: 'На воркере не задан ключ OpenAI.',
+        openai_error: 'OpenAI вернул ошибку: ' + (data.detail || data.status || ''),
+        unparseable_response: 'Модель ответила не в формате JSON — попробуйте переснять чётче.',
+      }[data.error] || ('Ошибка распознавания' + (data.error ? ': ' + data.error : '.'));
+      vsSet(`<div class="vs-row err"><img class="vs-thumb" src="${thumb}">${esc(msg)}</div>`);
+      return;
+    }
+
+    const r = data.result || {};
+    const parts = Array.isArray(r.parts) ? r.parts.filter(p =>
+      p && typeof p.len === 'number' && typeof p.wid === 'number' && p.len > 0 && p.wid > 0
+    ) : [];
+    if(!parts.length && !r.sheet){
+      vsSet(`<div class="vs-row err"><img class="vs-thumb" src="${thumb}">Не удалось разобрать размеры на фото. Попробуйте снять при хорошем свете, ровно и крупнее.</div>`);
+      return;
+    }
+
+    if(r.order) $('#orderName').value = r.order;
+    if(r.sheet && r.sheet.length > 0 && r.sheet.width > 0){
+      $('#sheetL').value = Math.round(r.sheet.length);
+      $('#sheetW').value = Math.round(r.sheet.width);
+      if(r.sheet.kerf > 0) $('#kerf').value = r.sheet.kerf;
+      if(r.sheet.trim > 0) $('#trim').value = r.sheet.trim;
+    }
+    if(parts.length){
+      $('#rows').innerHTML = '';
+      parts.forEach(p => addRow({
+        name: (p.name || 'Деталь').trim(),
+        len: Math.round(p.len), wid: Math.round(p.wid),
+        qty: Math.max(1, parseInt(p.qty, 10) || 1),
+      }));
+      refreshCount();
+    }
+
+    vsSet(`<div class="vs-row"><img class="vs-thumb" src="${thumb}"><span class="vs-ok">✓ Распознано</span>&nbsp;— проверьте поля ниже и нажмите «Рассчитать раскрой».</div>`);
+  }catch(e){
+    vsSet(`<div class="vs-row err">${thumb ? `<img class="vs-thumb" src="${thumb}">` : ''}Не получилось связаться с сервером распознавания. Проверьте интернет и попробуйте ещё раз.</div>`);
+  }
+}
+
 /* ---------------- старт ---------------- */
 (function init(){
   zoomI = window.innerWidth < 700 ? 1 : 2;
@@ -917,6 +1043,7 @@ function a2hsTip(){
   };
   $('#addRow').onclick = ()=>addRow();
   $('#btnCalc').onclick = calculate;
+  $('#photoInput').onchange = (e) => { const f = e.target.files[0]; if(f) recognizeSketch(f); e.target.value = ''; };
   $('#btnHistory').onclick = openDrawer;
   $('#btnPrintTop').onclick = doPrint;
   $('#clearHist').onclick = ()=>{ if(confirm('Удалить всю историю раскроев?')){ setHist([]); renderHist(); } };
