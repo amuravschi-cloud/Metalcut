@@ -106,6 +106,15 @@ input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
 @keyframes vsspin{to{transform:rotate(360deg)}}
 .vs-thumb{width:34px;height:34px;border-radius:7px;object-fit:cover;flex:none;border:1px solid var(--line)}
 .vs-ok{color:var(--green);font-weight:600}
+.vs-preview{display:flex;flex-direction:column;gap:8px}
+.vp-card{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
+.vp-row{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;font-size:13px}
+.vp-row+.vp-row{border-top:1px solid var(--line)}
+.vp-row span{color:var(--muted)}
+.vp-row b{font-weight:600;text-align:right;font-family:var(--mono)}
+.vp-row.vp-muted b{color:var(--muted);font-family:system-ui;font-weight:500}
+.vp-actions{display:flex;gap:8px}
+.vp-actions .btn{flex:1;justify-content:center;padding:10px;font-size:13.5px}
 .err{background:#fdecec;border:1px solid #f3bcbc;color:#8d2020;border-radius:9px;padding:10px 12px;font-size:13px;margin-top:12px}
 @media (prefers-color-scheme:dark){.err{background:#3a1a1a;border-color:#6b2d2d;color:#f3b9b9}}
 
@@ -1028,27 +1037,63 @@ async function recognizeSketch(file){
       return;
     }
 
-    if(r.order) $('#orderName').value = r.order;
-    if(r.sheet && r.sheet.length > 0 && r.sheet.width > 0){
-      $('#sheetL').value = Math.round(r.sheet.length);
-      $('#sheetW').value = Math.round(r.sheet.width);
-      if(r.sheet.kerf > 0) $('#kerf').value = r.sheet.kerf;
-      if(r.sheet.trim > 0) $('#trim').value = r.sheet.trim;
-    }
-    if(parts.length){
-      $('#rows').innerHTML = '';
-      parts.forEach(p => addRow({
-        name: (p.name || 'Деталь').trim(),
-        len: Math.round(p.len), wid: Math.round(p.wid),
-        qty: Math.max(1, parseInt(p.qty, 10) || 1),
-      }));
-      refreshCount();
-    }
-
-    vsSet(`<div class="vs-row"><img class="vs-thumb" src="${thumb}"><span class="vs-ok">✓ Распознано</span>&nbsp;— проверьте поля ниже и нажмите «Рассчитать раскрой».</div>`);
+    showVisionPreview(r, parts, thumb);
   }catch(e){
     vsSet(`<div class="vs-row err">${thumb ? `<img class="vs-thumb" src="${thumb}">` : ''}Не получилось связаться с сервером распознавания. Проверьте интернет и попробуйте ещё раз.</div>`);
   }
+}
+
+// Показываем, что именно распознала модель, и ждём подтверждения —
+// форма не трогается, пока пользователь явно не согласится.
+let pendingVision = null;
+function showVisionPreview(r, parts, thumb){
+  pendingVision = { r, parts };
+  const sheetLine = (r.sheet && r.sheet.length > 0 && r.sheet.width > 0)
+    ? `<div class="vp-row"><span>Лист</span><b>${nf(r.sheet.length)} × ${nf(r.sheet.width)} мм</b></div>`
+      + ((r.sheet.kerf > 0) ? `<div class="vp-row"><span>Толщина реза</span><b>${nf(r.sheet.kerf,1)} мм</b></div>` : '')
+      + ((r.sheet.trim > 0) ? `<div class="vp-row"><span>Обрезка кромки</span><b>${nf(r.sheet.trim)} мм</b></div>` : '')
+    : `<div class="vp-row vp-muted"><span>Лист</span><b>не распознан — впишите вручную</b></div>`;
+  const partsLines = parts.length
+    ? parts.map(p => `<div class="vp-row"><span>${esc((p.name||'Деталь').trim())}</span><b>${nf(p.len)} × ${nf(p.wid)} · ${Math.max(1,parseInt(p.qty,10)||1)} шт.</b></div>`).join('')
+    : `<div class="vp-row vp-muted"><span>Детали</span><b>не распознаны</b></div>`;
+  vsSet(`
+    <div class="vs-preview">
+      <div class="vs-row"><img class="vs-thumb" src="${thumb}"><span>Модель распознала это — проверьте перед тем, как заполнять форму:</span></div>
+      <div class="vp-card">
+        ${r.order ? `<div class="vp-row"><span>Заказ</span><b>${esc(r.order)}</b></div>` : ''}
+        ${sheetLine}
+        ${partsLines}
+      </div>
+      <div class="vp-actions">
+        <button class="btn primary" id="vpApply">✓ Верно, заполнить форму</button>
+        <button class="btn" id="vpCancel">✕ Отмена, введу сам</button>
+      </div>
+    </div>`);
+  $('#vpApply').onclick = applyVisionResult;
+  $('#vpCancel').onclick = () => { pendingVision = null; vsSet(''); };
+}
+
+function applyVisionResult(){
+  if(!pendingVision) return;
+  const { r, parts } = pendingVision;
+  if(r.order) $('#orderName').value = r.order;
+  if(r.sheet && r.sheet.length > 0 && r.sheet.width > 0){
+    $('#sheetL').value = Math.round(r.sheet.length);
+    $('#sheetW').value = Math.round(r.sheet.width);
+    if(r.sheet.kerf > 0) $('#kerf').value = r.sheet.kerf;
+    if(r.sheet.trim > 0) $('#trim').value = r.sheet.trim;
+  }
+  if(parts.length){
+    $('#rows').innerHTML = '';
+    parts.forEach(p => addRow({
+      name: (p.name || 'Деталь').trim(),
+      len: Math.round(p.len), wid: Math.round(p.wid),
+      qty: Math.max(1, parseInt(p.qty, 10) || 1),
+    }));
+    refreshCount();
+  }
+  pendingVision = null;
+  vsSet(`<div class="vs-row"><span class="vs-ok">✓ Форма заполнена</span>&nbsp;— проверьте поля ниже и нажмите «Рассчитать раскрой».</div>`);
 }
 
 /* ---------------- старт ---------------- */
