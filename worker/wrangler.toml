@@ -5,3 +5,8 @@ compatibility_date = "2024-11-01"
 # После деплоя воркер будет доступен по адресу вида:
 #   https://metalcut-vision.<ваш-акк>.workers.dev
 # Впишите этот адрес в index.html (переменная RECOGNIZE_URL).
+
+# KV-хранилище для дневного лимита запросов к распознаванию.
+[[kv_namespaces]]
+binding = "METALCUT_LIMIT"
+id = "97a4444e0b3a412685c0270687a3398b"

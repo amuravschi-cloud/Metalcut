@@ -993,6 +993,7 @@ async function recognizeSketch(file){
         server_not_configured: 'На воркере не задан ключ OpenAI.',
         openai_error: 'OpenAI вернул ошибку: ' + (data.detail || data.status || ''),
         unparseable_response: 'Модель ответила не в формате JSON — попробуйте переснять чётче.',
+        daily_limit: 'Сегодняшний лимит распознаваний исчерпан (' + (data.limit || '') + ' в сутки). Попробуйте завтра или введите детали вручную.',
       }[data.error] || ('Ошибка распознавания' + (data.error ? ': ' + data.error : '.'));
       vsSet(`<div class="vs-row err"><img class="vs-thumb" src="${thumb}">${esc(msg)}</div>`);
       return;

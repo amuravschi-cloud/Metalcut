@@ -17,11 +17,12 @@
  *   5. Скопировать выданный URL (вида https://metalcut-vision.<акк>.workers.dev)
  *      и вписать его в index.html как RECOGNIZE_URL.
  *
- * Защита: запросы принимаются только с разрешённых доменов (ALLOWED_ORIGINS).
- * Это не железная защита (Origin можно подделать вне браузера через curl),
- * но отсекает обычное копирование ссылки и случайное использование чужими
- * сайтами. Для более серьёзной защиты добавьте лимит запросов (KV) —
- * см. комментарий внизу файла.
+ * Защита: запросы принимаются только с разрешённых доменов (ALLOWED_ORIGINS)
+ * и ограничены суточным лимитом (DAILY_LIMIT), хранящимся в KV
+ * (namespace METALCUT_LIMIT — привязан в wrangler.toml). Origin-проверка
+ * не железная (подделывается вне браузера через curl), но вместе с лимитом
+ * ограничивает максимальный ущерб при утечке ссылки: даже если кто-то
+ * начнёт слать запросы напрямую, в сутки уйдёт не больше DAILY_LIMIT штук.
  */
 
 const ALLOWED_ORIGINS = [
@@ -32,6 +33,7 @@ const ALLOWED_ORIGINS = [
 
 const MODEL = 'gpt-4o';          // точнее на рукописном тексте, чем gpt-4o-mini
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 МБ после сжатия на клиенте — с запасом
+const DAILY_LIMIT = 60;          // максимум распознаваний в сутки на весь сайт (UTC-сутки)
 
 const SYSTEM_PROMPT = `Ты помогаешь оператору листогибочного/раскроечного цеха.
 На фото — рукописный эскиз или список для раскроя листового металла.
@@ -66,6 +68,15 @@ export default {
     if (!ALLOWED_ORIGINS.includes(origin)) {
       return withCors(json({ error: 'origin_not_allowed' }, 403), request);
     }
+
+    // Суточный лимит: одна запись в KV на календарный день (UTC), инкрементируется
+    // до вызова OpenAI, чтобы шторм запросов не успел потратить лишнего.
+    const dayKey = 'day:' + new Date().toISOString().slice(0, 10);
+    const used = parseInt((await env.METALCUT_LIMIT.get(dayKey)) || '0', 10);
+    if (used >= DAILY_LIMIT) {
+      return withCors(json({ error: 'daily_limit', limit: DAILY_LIMIT }, 429), request);
+    }
+    await env.METALCUT_LIMIT.put(dayKey, String(used + 1), { expirationTtl: 172800 });
 
     let body;
     try { body = await request.json(); }
@@ -145,15 +156,3 @@ function withCors(res, request) {
   h.set('Vary', 'Origin');
   return new Response(res.body, { status: res.status, headers: h });
 }
-
-/* ------------------------------------------------------------
- * Опционально: дневной лимит запросов, чтобы случайно не спалить
- * весь баланс OpenAI при утечке URL. Требует KV namespace:
- *   wrangler kv:namespace create METALCUT_LIMIT
- * и привязки в wrangler.toml. Пример проверки в начале fetch():
- *
- *   const key = 'day:' + new Date().toISOString().slice(0,10);
- *   const used = parseInt(await env.METALCUT_LIMIT.get(key) || '0', 10);
- *   if (used >= 100) return withCors(json({error:'daily_limit'}, 429), request);
- *   await env.METALCUT_LIMIT.put(key, String(used + 1), {expirationTtl: 172800});
- * ------------------------------------------------------------ */
