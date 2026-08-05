@@ -1,0 +1,17 @@
+{
+  "name": "MetalCut — раскрой листового металла",
+  "short_name": "MetalCut",
+  "description": "Карта раскроя листового металла на гильотине: порядок резов, отметки от упора, деловой остаток.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3f4f6",
+  "theme_color": "#12604f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

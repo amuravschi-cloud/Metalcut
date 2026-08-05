@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12604f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="mobile-web-app-capable" content="yes">
+<title>MetalCut — раскрой листового металла</title>
+<style>
+:root{
+  --bg:#f3f4f6; --card:#ffffff; --ink:#111827; --ink2:#374151; --muted:#6b7280;
+  --line:#e5e7eb; --line2:#d1d5db; --accent:#e0a32e; --accent-d:#c5871a;
+  --green:#12604f; --red:#d64545; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.05);
+  --radius:12px; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0e1116;--card:#161a20;--ink:#e7eaee;--ink2:#c4cad2;--muted:#8f98a5;
+    --line:#242a33;--line2:#2f3742;--shadow:0 1px 2px rgba(0,0,0,.4);}
+}
+:root[data-theme="light"]{--bg:#f3f4f6;--card:#fff;--ink:#111827;--ink2:#374151;--muted:#6b7280;--line:#e5e7eb;--line2:#d1d5db;}
+:root[data-theme="dark"]{--bg:#0e1116;--card:#161a20;--ink:#e7eaee;--ink2:#c4cad2;--muted:#8f98a5;--line:#242a33;--line2:#2f3742;}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;-webkit-text-size-adjust:100%}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+h1,h2,h3{margin:0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- header ---------- */
+.topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;
+  padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+.logo{display:flex;align-items:center;gap:10px;min-width:0}
+.logo .mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#3b2a06;
+  display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:.5px;flex:none}
+.logo b{font-size:16px;letter-spacing:-.2px;display:block}
+.logo span{font-size:11.5px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spacer{flex:1}
+.btn{border:1px solid var(--line2);background:var(--card);border-radius:9px;padding:8px 12px;
+  font-size:13.5px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent-d);color:#2a1e04;font-weight:600}
+.btn.dark{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.btn .pill{background:var(--line);border-radius:20px;padding:1px 7px;font-size:11.5px;font-family:var(--mono)}
+.btn.icon{padding:8px 10px}
+
+/* ---------- layout ---------- */
+.wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:0;align-items:start}
+.panel{padding:18px 16px 40px;border-right:1px solid var(--line);background:var(--card);min-height:calc(100vh - 55px)}
+.result{padding:20px 20px 80px;min-width:0}
+@media (max-width:960px){
+  .wrap{grid-template-columns:1fr}
+  .panel{border-right:0;border-bottom:1px solid var(--line);min-height:0;padding-bottom:20px}
+  .result{padding:14px 12px 96px}
+  body[data-tab="in"] .result{display:none}
+  body[data-tab="out"] .panel{display:none}
+  .tabbar{display:flex!important}
+}
+
+/* ---------- form ---------- */
+.sec{margin-bottom:22px}
+.sec-h{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.sec-h i{width:22px;height:22px;border-radius:50%;background:var(--green);color:#fff;font-style:normal;
+  font-size:11px;font-weight:700;display:grid;place-items:center;font-family:var(--mono)}
+.sec-h h3{font-size:15px;font-weight:650}
+.sec-h .unit{margin-left:auto;font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+label.f{display:block;margin-bottom:10px}
+label.f>span{display:block;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+label.f>span em{font-style:normal;text-transform:none;letter-spacing:0;font-size:11px;opacity:.75}
+input[type=text],input[type=number]{width:100%;padding:10px 11px;border:1px solid var(--line2);border-radius:9px;
+  background:var(--card);font-family:var(--mono);font-size:14.5px}
+input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink2);margin:2px 0 10px}
+.chk input{width:17px;height:17px;accent-color:var(--green)}
+
+.ptable{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.phead,.prow{display:grid;grid-template-columns:minmax(0,1fr) 62px 62px 46px 30px;gap:6px;align-items:center;padding:6px 8px}
+.phead{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--bg);padding-top:8px;padding-bottom:8px}
+.prow+.prow{border-top:1px solid var(--line)}
+.prow input{padding:8px 7px;font-size:13.5px;border-radius:7px}
+.cell{min-width:0;display:block}
+.cell span{display:none}
+.prow .x{border:0;background:transparent;color:var(--muted);font-size:15px;padding:4px;border-radius:6px}
+.prow .x:hover{color:var(--red);background:var(--bg)}
+.addrow{width:100%;margin-top:8px;border:1px dashed var(--line2);background:transparent;border-radius:9px;padding:9px;
+  color:var(--ink2);font-size:13.5px}
+.addrow:hover{border-color:var(--accent);color:var(--ink)}
+.calc{width:100%;margin-top:16px;padding:14px;font-size:15.5px;justify-content:center}
+.hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+.err{background:#fdecec;border:1px solid #f3bcbc;color:#8d2020;border-radius:9px;padding:10px 12px;font-size:13px;margin-top:12px}
+@media (prefers-color-scheme:dark){.err{background:#3a1a1a;border-color:#6b2d2d;color:#f3b9b9}}
+
+/* ---------- result ---------- */
+.eyebrow{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.title-row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.title-row h2{font-size:26px;letter-spacing:-.4px;font-weight:680}
+.title-row .acts{margin-left:auto;display:flex;gap:8px}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--line);border-radius:var(--radius);
+  overflow:hidden;background:var(--card);box-shadow:var(--shadow);margin-bottom:18px}
+.stat{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.stat:last-child{border-right:0}
+.stat .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font-size:22px;font-weight:680;font-family:var(--mono);letter-spacing:-.5px;margin:3px 0 2px}
+.stat .s{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:7px}
+.bar i{display:block;height:100%;background:var(--green)}
+/* --- телефон: крупные поля (iOS не зумит при фокусе от 16px), удобные касания --- */
+@media (max-width:960px){
+  input[type=text],input[type=number]{font-size:16px;padding:12px 11px}
+  .prow input{font-size:16px;padding:11px 8px}
+  .phead{display:none}
+  .prow{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 38px;
+    grid-template-areas:"nm nm nm x" "a b c x";gap:8px;padding:11px 9px}
+  .prow .p-name{grid-area:nm}
+  .prow>label:nth-child(2){grid-area:a}
+  .prow>label:nth-child(3){grid-area:b}
+  .prow>label:nth-child(4){grid-area:c}
+  .prow .x{grid-area:x;align-self:center;font-size:19px;padding:8px}
+  .cell span{display:block;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 3px 2px}
+  .chk input{width:21px;height:21px}
+  .addrow{padding:13px}
+  .calc{position:sticky;bottom:calc(60px + env(safe-area-inset-bottom));padding:16px;
+    box-shadow:0 -2px 14px rgba(16,24,40,.14)}
+  .cut{padding:12px 14px}
+  .leg{padding:12px 14px}
+  .tabs button{padding:12px 14px}
+}
+.a2hs{display:none;align-items:flex-start;gap:10px;background:var(--card);border:1px solid var(--line);
+  border-left:3px solid var(--accent);border-radius:10px;padding:11px 12px;margin:0 0 14px;font-size:13px;line-height:1.5}
+.a2hs.show{display:flex}
+.a2hs b{font-weight:620}
+.a2hs button{border:0;background:transparent;color:var(--muted);font-size:16px;padding:0 2px;margin-left:auto}
+@media (max-width:520px){
+  .topbar{padding:8px 10px;gap:7px}
+  .logo span{display:none}
+  .logo b{font-size:15px}
+  .logo .mark{width:30px;height:30px}
+  .btn{padding:7px 9px;font-size:12.5px}
+  .title-row h2{font-size:21px}
+  .result{padding:12px 10px 90px}
+}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}
+  .stats .stat:first-child{grid-column:1/-1;border-right:0}
+  .stat{border-bottom:1px solid var(--line)}
+  .stat:nth-child(odd){border-right:1px solid var(--line)}
+  .stat:nth-child(even){border-right:0}
+  .stat .v{font-size:19px}}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:0;overflow-x:auto}
+.tabs button{border:0;background:transparent;padding:9px 13px;font-size:13.5px;color:var(--muted);
+  border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.mapbox{padding:14px;margin:14px 0 16px}
+.maptools{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px;color:var(--ink2)}
+.maptools label{display:flex;align-items:center;gap:6px}
+.maptools input{accent-color:var(--green);width:17px;height:17px}
+.zoom{margin-left:auto;display:flex;gap:5px}
+.zoom button{border:1px solid var(--line2);background:var(--card);border-radius:8px;padding:6px 11px;
+  font-size:13px;min-width:38px;min-height:38px;color:var(--ink2)}
+.zoom button.on{background:var(--green);border-color:var(--green);color:#fff}
+.zoom button:active{transform:scale(.96)}
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.scroller svg{display:block;width:100%;height:auto}
+.scroller{border:1px solid var(--line);border-radius:8px;padding:6px}
+.scrollhint{font-size:11.5px;color:var(--muted);margin-top:6px;display:none}
+@media (max-width:760px){.scrollhint{display:block}}
+
+.cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px}
+@media (max-width:900px){.cols{grid-template-columns:1fr}}
+.chead{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.chead b{font-size:14px;font-weight:620}
+.chead .r{margin-left:auto;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.cut{display:flex;align-items:center;gap:11px;padding:9px 14px;border-bottom:1px solid var(--line)}
+.cut:last-child{border-bottom:0}
+.cut .n{width:22px;height:22px;flex:none;border-radius:50%;background:var(--red);color:#fff;font-size:11px;
+  display:grid;place-items:center;font-family:var(--mono);font-weight:600}
+.cut .t{min-width:0}
+.cut .t b{display:block;font-size:13.5px;font-weight:580}
+.cut .t span{font-size:11.5px;color:var(--muted)}
+.cut .len{margin-left:auto;font-family:var(--mono);font-size:13px;white-space:nowrap;padding-left:8px}
+.leg{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line)}
+.leg:last-child{border-bottom:0}
+.leg i{width:13px;height:13px;border-radius:3px;flex:none}
+.leg .t b{display:block;font-size:13.5px;font-weight:560}
+.leg .t span{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.leg .a{margin-left:auto;font-family:var(--mono);font-size:13px}
+.note{font-size:12.5px;color:var(--ink2);background:var(--bg);border:1px solid var(--line);border-radius:10px;
+  padding:11px 13px;margin-top:14px;line-height:1.55}
+.note b{font-weight:620}
+.empty{display:grid;place-items:center;text-align:center;padding:60px 20px;color:var(--muted);font-size:14px}
+.empty div{max-width:340px;line-height:1.6}
+
+/* ---------- history drawer ---------- */
+.drawer{position:fixed;inset:0;z-index:60;display:none}
+.drawer.on{display:block}
+.drawer .bd{position:absolute;inset:0;background:rgba(15,20,26,.42)}
+.drawer .pn{position:absolute;top:0;right:0;bottom:0;width:min(420px,92vw);background:var(--card);
+  border-left:1px solid var(--line);display:flex;flex-direction:column}
+.drawer .hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.drawer .hd b{font-size:16px}
+.drawer .bodyl{overflow:auto;padding:10px 12px;flex:1}
+.hitem{border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:9px;display:flex;gap:10px;align-items:center}
+.hitem .t{min-width:0;flex:1}
+.hitem .t b{display:block;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hitem .t span{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.hitem .go{font-size:12.5px;padding:6px 10px}
+.hitem .del{border:0;background:transparent;color:var(--muted);padding:6px}
+.hitem .del:hover{color:var(--red)}
+
+/* ---------- mobile tabbar ---------- */
+.tabbar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:40;background:var(--card);
+  border-top:1px solid var(--line);padding:7px 10px calc(7px + env(safe-area-inset-bottom));gap:7px}
+.tabbar button{flex:1;border:1px solid transparent;background:transparent;border-radius:9px;padding:10px;font-size:13.5px;color:var(--muted)}
+body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar button:nth-child(2){background:var(--bg);color:var(--ink);font-weight:600;border-color:var(--line)}
+
+/* ---------- print ---------- */
+#printArea{display:none}
+@media print{
+  @page{size:landscape;margin:10mm}
+  body{background:#fff}
+  .topbar,.panel,.tabbar,.result,.drawer{display:none!important}
+  #printArea{display:block}
+  .psheet{page-break-after:always;color:#000}
+  .psheet:last-child{page-break-after:auto}
+  .ph{display:flex;align-items:baseline;gap:10px;border-bottom:1.5px solid #000;padding-bottom:6px;margin-bottom:10px}
+  .ph b{font-size:16px}
+  .ph span{font-size:11px;color:#444;font-family:var(--mono)}
+  .ph .rr{margin-left:auto;font-size:11px;font-family:var(--mono)}
+  .psheet svg{width:100%;height:auto;max-height:118mm}
+  .ptables{display:grid;grid-template-columns:1.5fr 1fr;gap:10mm;margin-top:6mm;font-size:10px}
+  .ptables table{width:100%;border-collapse:collapse}
+  .ptables th{text-align:left;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:#555;
+    border-bottom:1px solid #999;padding:3px 4px}
+  .ptables td{border-bottom:1px solid #ddd;padding:3px 4px;font-family:var(--mono)}
+  .ptables td.nm{font-family:system-ui}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-512.png" type="image/png">
+</head>
+<body data-tab="in">
+
+<header class="topbar">
+  <div class="logo">
+    <div class="mark">MC</div>
+    <div><b>MetalCut</b><span>Раскрой листового металла · гильотина</span></div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn" id="btnHistory">История <span class="pill" id="histCount">0</span></button>
+  <button class="btn icon" id="btnTheme" title="Тема">◐</button>
+  <button class="btn dark" id="btnPrintTop">Печать</button>
+</header>
+
+<div class="wrap">
+  <!-- ================= INPUT ================= -->
+  <aside class="panel">
+    <div class="a2hs" id="a2hs"></div>
+    <div class="sec">
+      <div class="sec-h"><i>01</i><h3>Исходный лист</h3><div class="unit">мм</div></div>
+      <label class="f"><span>Название заказа <em>необязательно</em></span>
+        <input type="text" id="orderName" placeholder="Например, заказ №42"></label>
+      <div class="grid2">
+        <label class="f"><span>Длина</span><input type="number" id="sheetL" value="6000" min="1" inputmode="decimal"></label>
+        <label class="f"><span>Ширина</span><input type="number" id="sheetW" value="1500" min="1" inputmode="decimal"></label>
+      </div>
+      <div class="grid2">
+        <label class="f"><span>Толщина реза</span><input type="number" id="kerf" value="0" min="0" step="0.1" inputmode="decimal"></label>
+        <label class="f"><span>Обрезка кромки</span><input type="number" id="trim" value="0" min="0" step="1" inputmode="decimal"></label>
+      </div>
+      <label class="chk"><input type="checkbox" id="allowRot" checked> Разрешить поворот деталей на 90°</label>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><i>02</i><h3>Детали</h3><div class="unit" id="partCount">0 шт.</div></div>
+      <div class="ptable">
+        <div class="phead"><div>Название</div><div>Длина</div><div>Ширина</div><div>Кол.</div><div></div></div>
+        <div id="rows"></div>
+      </div>
+      <button class="addrow" id="addRow">+ Добавить деталь</button>
+    </div>
+
+    <button class="btn primary calc" id="btnCalc">Рассчитать раскрой &nbsp;→</button>
+    <div id="formErr"></div>
+    <p class="hint">Пустые строки и нулевые поля игнорируются. Данные не покидают устройство — расчёт и история хранятся в браузере.</p>
+  </aside>
+
+  <!-- ================= RESULT ================= -->
+  <section class="result" id="result">
+    <div class="empty"><div>Заполните лист и детали слева, затем нажмите «Рассчитать раскрой».<br>Здесь появится карта раскроя, порядок резов гильотины и статистика.</div></div>
+  </section>
+</div>
+
+<nav class="tabbar">
+  <button onclick="setTab('in')">Данные</button>
+  <button onclick="setTab('out')">Раскрой</button>
+</nav>
+
+<div class="drawer" id="drawer">
+  <div class="bd" onclick="closeDrawer()"></div>
+  <div class="pn">
+    <div class="hd"><b>История раскроев</b><div class="spacer"></div>
+      <button class="btn" id="clearHist">Очистить</button>
+      <button class="btn icon" onclick="closeDrawer()">✕</button></div>
+    <div class="bodyl" id="histList"></div>
+  </div>
+</div>
+
+<div id="printArea"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   MetalCut — гильотинный раскрой листового металла
+   Всё в одном файле: упаковщик, генератор резов, SVG, история.
+   ============================================================ */
+const EPS = 1e-6;
+const LS_HIST = 'metalcut:history:v1';
+const LS_LAST = 'metalcut:last:v1';
+const LS_THEME = 'metalcut:theme';
+const PALETTE = ['#e8b54a','#5cbfa0','#7ca7ef','#ea8e8e','#b39ce2','#6fc4dc','#8dc96f','#e79fc6','#c9b876','#8fa0b6'];
+
+const $ = s => document.querySelector(s);
+const nf = (v,d=0) => (isFinite(v)?v:0).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
+const m2 = mm2 => nf(mm2/1e6, 2) + ' м²';
+
+/* ---------------- ввод ---------------- */
+function partRow(p={}){
+  const d = document.createElement('div');
+  d.className = 'prow';
+  d.innerHTML = `<input class="p-name" type="text" placeholder="Деталь">
+    <label class="cell"><span>длина</span><input class="p-len" type="number" min="0" inputmode="decimal" placeholder="0"></label>
+    <label class="cell"><span>ширина</span><input class="p-wid" type="number" min="0" inputmode="decimal" placeholder="0"></label>
+    <label class="cell"><span>кол.</span><input class="p-qty" type="number" min="1" inputmode="numeric" value="1"></label>
+    <button class="x" title="Удалить">✕</button>`;
+  d.querySelector('.p-name').value = p.name || '';
+  d.querySelector('.p-len').value = p.len ?? '';
+  d.querySelector('.p-wid').value = p.wid ?? '';
+  d.querySelector('.p-qty').value = p.qty ?? 1;
+  d.querySelector('.x').onclick = () => { d.remove(); if(!$('#rows').children.length) addRow(); refreshCount(); };
+  d.addEventListener('input', refreshCount);
+  return d;
+}
+function addRow(p){ $('#rows').appendChild(partRow(p)); refreshCount(); }
+function readForm(){
+  const parts = [];
+  [...$('#rows').children].forEach((r,i) => {
+    const len = parseFloat(r.querySelector('.p-len').value);
+    const wid = parseFloat(r.querySelector('.p-wid').value);
+    const qty = parseInt(r.querySelector('.p-qty').value,10);
+    if(!(len>0) || !(wid>0) || !(qty>0)) return;
+    parts.push({name: (r.querySelector('.p-name').value||'').trim() || ('Деталь '+(i+1)), len, wid, qty});
+  });
+  return {
+    order: $('#orderName').value.trim(),
+    L: parseFloat($('#sheetL').value), W: parseFloat($('#sheetW').value),
+    kerf: Math.max(0, parseFloat($('#kerf').value)||0),
+    trim: Math.max(0, parseFloat($('#trim').value)||0),
+    rot: $('#allowRot').checked,
+    parts
+  };
+}
+function fillForm(inp){
+  $('#orderName').value = inp.order||''; $('#sheetL').value = inp.L; $('#sheetW').value = inp.W;
+  $('#kerf').value = inp.kerf; $('#trim').value = inp.trim; $('#allowRot').checked = !!inp.rot;
+  $('#rows').innerHTML=''; (inp.parts||[]).forEach(addRow); if(!$('#rows').children.length) addRow();
+}
+function refreshCount(){
+  const n = readForm().parts.reduce((s,p)=>s+p.qty,0);
+  $('#partCount').textContent = n + ' шт.';
+}
+
+/* ============================================================
+   УПАКОВЩИК: бинарное гильотинное дерево
+   Каждое размещение делит область одним сквозным резом — поэтому
+   любой полученный раскрой физически режется гильотиной.
+   ============================================================ */
+const node = (x,y,w,h) => ({x,y,w,h,type:'free',item:null,cut:null,c1:null,c2:null});
+
+const SPLIT_RULES = {
+  // возвращают 'V' (сначала вертикальный рез) или 'H'
+  SLAS:(w,h,pw,ph)=> (w-pw) < (h-ph) ? 'H' : 'V',
+  LLAS:(w,h,pw,ph)=> (w-pw) < (h-ph) ? 'V' : 'H',
+  SAS :(w,h)=> w < h ? 'H' : 'V',
+  LAS :(w,h)=> w < h ? 'V' : 'H',
+  MAXA:(w,h,pw,ph)=> ((w-pw)*h > w*(h-ph)) ? 'V' : 'H'
+};
+
+function leaves(n, out=[]){
+  if(n.type==='split'){ leaves(n.c1,out); leaves(n.c2,out); } else out.push(n);
+  return out;
+}
+function findSpot(root, it, rot){
+  let best=null;
+  for(const n of leaves(root)){
+    if(n.type!=='free') continue;
+    const opts = [[it.w,it.h,false]];
+    if(rot && it.w!==it.h) opts.push([it.h,it.w,true]);
+    for(const [pw,ph,r] of opts){
+      if(pw > n.w+EPS || ph > n.h+EPS) continue;
+      const waste = n.w*n.h - pw*ph;
+      const short = Math.min(n.w-pw, n.h-ph);
+      if(!best || waste < best.waste-EPS || (Math.abs(waste-best.waste)<EPS && short < best.short))
+        best = {node:n, pw, ph, rot:r, waste, short};
+    }
+  }
+  return best;
+}
+function place(n, item, pw, ph, rule, k){
+  const {x,y,w,h} = n;
+  const restW = w-pw, restH = h-ph;
+  if(restW<=EPS && restH<=EPS){ n.type='item'; n.item=item; n.w=pw; n.h=ph; return; }
+  let dir;
+  if(restW<=EPS) dir='H';
+  else if(restH<=EPS) dir='V';
+  else dir = rule(w,h,pw,ph);
+  n.type='split';
+  if(dir==='V'){
+    n.cut = {dir:'V', pos:x+pw, from:y, len:h};
+    n.c1 = node(x, y, pw, h);
+    n.c2 = node(x+pw+k, y, Math.max(0,restW-k), h);
+  }else{
+    n.cut = {dir:'H', pos:y+ph, from:x, len:w};
+    n.c1 = node(x, y, w, ph);
+    n.c2 = node(x, y+ph+k, w, Math.max(0,restH-k));
+  }
+  place(n.c1, item, pw, ph, rule, k);   // внутри первой половины — второй рез
+}
+function collectCuts(root){
+  const out=[], q=[root];
+  while(q.length){
+    const n = q.shift();
+    if(n.type==='split'){ out.push({...n.cut}); q.push(n.c1,n.c2); }
+  }
+  return out.map((c,i)=>({...c, n:i+1}));
+}
+function collectItems(root){
+  // n.w/n.h — фактический габарит на листе (уже с учётом поворота)
+  return leaves(root).filter(n=>n.type==='item')
+    .map(n=>({...n.item, x:n.x, y:n.y, w:n.w, h:n.h}));
+}
+function collectFree(root){
+  return leaves(root).filter(n=>n.type==='free' && n.w>EPS && n.h>EPS)
+    .map(n=>({x:n.x,y:n.y,w:n.w,h:n.h}));
+}
+
+/* один прогон: раскладываем весь список по листам */
+function runPack(items, SW, SH, ox, oy, k, rot, rule){
+  const sheets = [];
+  let rest = items.slice();
+  let guard = 0;
+  while(rest.length){
+    if(++guard > 500) return null;
+    const root = node(ox, oy, SW, SH);
+    const next = [];
+    let placed = 0;
+    for(const it of rest){
+      const spot = findSpot(root, it, rot);
+      if(spot){ place(spot.node, {...it, rot:spot.rot}, spot.pw, spot.ph, rule, k); placed++; }
+      else next.push(it);
+    }
+    if(!placed) return null;             // не влезает даже на пустой лист
+    sheets.push(root);
+    rest = next;
+  }
+  return sheets;
+}
+function optimize(inp){
+  const SW = inp.L - 2*inp.trim, SH = inp.W - 2*inp.trim;
+  if(!(SW>0 && SH>0)) return {error:'Обрезка кромки больше размеров листа.'};
+
+  // разворачиваем количества в отдельные экземпляры
+  const items = [];
+  inp.parts.forEach((p,pi)=>{
+    for(let q=0;q<p.qty;q++) items.push({pid:pi, name:p.name, w:p.len, h:p.wid, area:p.len*p.wid, idx:items.length+1});
+  });
+  if(!items.length) return {error:'Добавьте хотя бы одну деталь с размерами и количеством.'};
+
+  // проверка «в принципе помещается»
+  const bad = inp.parts.filter(p=>{
+    const fit = (p.len<=SW+EPS && p.wid<=SH+EPS);
+    const fitR = inp.rot && (p.wid<=SW+EPS && p.len<=SH+EPS);
+    return !(fit||fitR);
+  });
+  if(bad.length) return {error:'Не помещается на лист: '+bad.map(p=>`${p.name} ${nf(p.len)}×${nf(p.wid)}`).join(', ')+
+    (inp.rot?'':'. Попробуйте разрешить поворот деталей.')};
+
+  const sorts = {
+    area:(a,b)=> b.area-a.area || Math.max(b.w,b.h)-Math.max(a.w,a.h),
+    maxside:(a,b)=> Math.max(b.w,b.h)-Math.max(a.w,a.h) || b.area-a.area,
+    height:(a,b)=> b.h-a.h || b.w-a.w,
+    width:(a,b)=> b.w-a.w || b.h-a.h
+  };
+  let best=null;
+  for(const sk of Object.keys(sorts)){
+    const list = items.slice().sort(sorts[sk]);
+    for(const rk of Object.keys(SPLIT_RULES)){
+      const sheets = runPack(list, SW, SH, inp.trim, inp.trim, inp.kerf, inp.rot, SPLIT_RULES[rk]);
+      if(!sheets) continue;
+      const cuts = sheets.reduce((s,r)=>s+collectCuts(r).length,0);
+      const lastFree = collectFree(sheets[sheets.length-1]);
+      const remnant = lastFree.reduce((m,f)=>Math.max(m,f.w*f.h),0);
+      const score = [sheets.length, -remnant, cuts];
+      if(!best || cmp(score,best.score)<0) best = {sheets, score, sk, rk, cuts};
+    }
+  }
+  if(!best) return {error:'Не удалось разместить детали. Проверьте размеры.'};
+
+  const sheets = best.sheets.map((root,i)=>{
+    const its = collectItems(root), cuts = collectCuts(root), free = collectFree(root);
+    const used = its.reduce((s,t)=>s+t.w*t.h,0);
+    return {i:i+1, root, items:its, cuts, free, used, usage: used/(inp.L*inp.W)};
+  });
+  const totalUsed = sheets.reduce((s,x)=>s+x.used,0);
+  const totalArea = sheets.length*inp.L*inp.W;
+  return {
+    input: inp, sheets,
+    totals:{
+      sheets: sheets.length,
+      items: items.length,
+      cuts: sheets.reduce((s,x)=>s+x.cuts.length,0),
+      used: totalUsed, area: totalArea,
+      usage: totalUsed/totalArea,
+      waste: totalArea-totalUsed
+    },
+    meta: best.sk+'/'+best.rk
+  };
+}
+const cmp = (a,b)=>{ for(let i=0;i<a.length;i++){ if(a[i]!==b[i]) return a[i]<b[i]?-1:1; } return 0; };
+
+/* ============================================================
+   ОТРИСОВКА КАРТЫ (SVG в миллиметрах)
+   ============================================================ */
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function svgSheet(res, sh, opt={}){
+  const {L,W} = res.input;
+  const S = Math.max(L,W);
+  const padL = S*0.045, padT = S*0.05, padR = S*0.02, padB = S*0.025;
+  const sw = S/1100;                       // базовая толщина линии
+  const fsBase = S/62;
+  let g = '';
+
+  // лист
+  g += `<rect x="0" y="0" width="${L}" height="${W}" fill="${opt.print?'#fff':'var(--sheet)'}" stroke="var(--edge)" stroke-width="${sw*2}"/>`;
+
+  // рабочая зона после обрезки кромки
+  if(res.input.trim>0)
+    g += `<rect x="${res.input.trim}" y="${res.input.trim}" width="${L-2*res.input.trim}" height="${W-2*res.input.trim}"
+      fill="none" stroke="var(--edge)" stroke-width="${sw}" stroke-dasharray="${sw*8} ${sw*6}" opacity=".7"/>`;
+
+  /* --- движок подписей: текст не выходит за границы и не мельчит ---
+     Кегль задаётся в мм листа, но проверяется в реальных единицах вывода:
+     на экране лист гарантированно рисуется шириной minW px, на печати ~270 мм. */
+  const outW = opt.print ? 270 : (opt.width || 900);
+  const scale = outW/(L+padL+padR);           // единиц вывода на 1 мм листа
+  const readable = (opt.print ? 1.9 : 8.5)/scale;   // минимальный различимый кегль, мм листа
+  const FS = Math.min(S/56, W/8);             // базовый кегль (в мм листа)
+  const FSMIN = readable;
+  const txtW = (t,fs,k) => t.length*k*fs;
+
+  // lines: [0]=имя, [1]=размер, [2]=справка. Приоритет показа: размер → имя → справка.
+  // Кегль уменьшается ступенями, пока в деталь не влезет строка с размером.
+  function label(box, lines, fs0, fill){
+    for(const [m,strict] of [[1,true],[0.8,true],[0.64,true],[0.5,false]]){
+      const s = tryLabel(box, lines, fs0*m, fill, strict);
+      if(s) return s;
+    }
+    return '';
+  }
+  function tryLabel(box, lines, fs, fill, needSize){
+    const vert = box.h > box.w*1.35;                       // узкая деталь — пишем вдоль
+    const BW = (vert? box.h : box.w)*0.88, BH = (vert? box.w : box.h)*0.86;
+    if(fs < FSMIN) return '';
+    const maxLines = Math.floor(BH/(fs*1.32));
+    if(maxLines < 1) return '';
+    const pick = [];
+    for(const i of [1,0,2]){
+      const l = lines[i];
+      if(!l || pick.length>=maxLines) continue;
+      if(fs*l.s >= FSMIN && txtW(l.t, fs*l.s, l.k) <= BW) pick.push(i);
+    }
+    if(!pick.length || (needSize && !pick.includes(1))) return '';
+    pick.sort((a,b)=>a-b);
+    const cx = box.x+box.w/2, cy = box.y+box.h/2, lh = fs*1.32;
+    const y0 = cy - (pick.length-1)*lh/2;
+    const body = pick.map((i,k)=>{
+      const l = lines[i];
+      return `<text x="${cx}" y="${(y0+k*lh).toFixed(1)}" text-anchor="middle" dominant-baseline="central"
+        font-size="${(fs*l.s).toFixed(1)}" font-weight="${l.w}" fill="${fill}"
+        font-family="${l.f}">${esc(l.t)}</text>`;
+    }).join('');
+    return vert ? `<g transform="rotate(-90 ${cx} ${cy})">${body}</g>` : body;
+  }
+  const MONO = 'var(--mono)', SANS = 'system-ui,-apple-system,sans-serif';
+
+  // деловой остаток
+  if(opt.remnant!==false){
+    sh.free.filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).forEach(f=>{
+      g += `<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="none" stroke="var(--edge)"
+        stroke-width="${sw}" stroke-dasharray="${sw*6} ${sw*5}"/>`;
+      g += label(f, [
+        {t:'остаток', k:.58, s:.72, w:400, f:SANS},
+        {t:`${nf(f.w)} × ${nf(f.h)}`, k:.62, s:.85, w:500, f:MONO},
+        null
+      ], FS*0.82, 'var(--faint)');
+    });
+  }
+
+  // детали
+  sh.items.forEach(it=>{
+    const c = PALETTE[it.pid % PALETTE.length];
+    g += `<rect x="${it.x}" y="${it.y}" width="${it.w}" height="${it.h}" fill="${c}" fill-opacity=".38"
+      stroke="${c}" stroke-width="${sw*2.2}" rx="${S/900}"/>`;
+    let s = label(it, [
+      {t: it.name.toUpperCase(), k:.60, s:.90, w:600, f:SANS},
+      {t: `${nf(it.w)} × ${nf(it.h)}`, k:.62, s:1.0, w:700, f:MONO},
+      {t: `#${it.idx} · ${m2(it.w*it.h)}`, k:.62, s:.72, w:400, f:MONO}
+    ], FS, 'var(--label)');
+    if(!s){                                            // не влезло ничего — хотя бы номер
+      const fs = Math.min(it.w*0.8/(String(it.idx).length+1)/0.62, it.h*0.5, FS);
+      if(fs >= FSMIN*0.8)
+        s = `<text x="${it.x+it.w/2}" y="${it.y+it.h/2}" text-anchor="middle" dominant-baseline="central"
+          font-size="${fs.toFixed(1)}" fill="var(--label)" font-family="${MONO}">#${it.idx}</text>`;
+    }
+    if(it.rot){                                        // значок поворота на 90°
+      const rr = Math.min(FS*.7, it.w*.28, it.h*.28);
+      if(rr >= FSMIN*.75) s += `<text x="${it.x+it.w-rr*.6}" y="${it.y+rr*.8}" text-anchor="middle"
+        dominant-baseline="central" font-size="${rr.toFixed(1)}" fill="var(--faint)" font-family="${MONO}">⟳</text>`;
+    }
+    g += s;
+  });
+
+  // резы + номера (бейджи разводятся вдоль линии реза, чтобы не перекрываться)
+  if(opt.cuts!==false){
+    const r = S/110, spots = [];
+    sh.cuts.forEach(c=>{
+      const isV = c.dir==='V';
+      const x1 = isV? c.pos : c.from, y1 = isV? c.from : c.pos;
+      const x2 = isV? c.pos : c.from+c.len, y2 = isV? c.from+c.len : c.pos;
+      g += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#d64545" stroke-width="${sw*1.6}"
+        stroke-dasharray="${sw*10} ${sw*7}" opacity=".9"/>`;
+      let t = 0, px = x1, py = y1;
+      for(let k=0;k<60;k++){
+        px = isV? c.pos : c.from+t; py = isV? c.from+t : c.pos;
+        if(!spots.some(p => Math.hypot(p[0]-px, p[1]-py) < r*2.15)) break;
+        t += r*2.3;
+        if(t > c.len){ t = c.len; px = isV? c.pos : c.from+t; py = isV? c.from+t : c.pos; break; }
+      }
+      spots.push([px,py]);
+      g += `<circle cx="${px}" cy="${py}" r="${r}" fill="#d64545" stroke="#fff" stroke-width="${sw*1.1}"/>
+        <text x="${px}" y="${py}" text-anchor="middle" dominant-baseline="central" font-size="${(r*1.1).toFixed(1)}"
+        fill="#fff" font-family="${MONO}" font-weight="700">${c.n}</text>`;
+    });
+  }
+
+  // размеры листа
+  g += `<text x="${L/2}" y="${-padT*0.42}" text-anchor="middle" font-size="${fsBase*.85}" fill="var(--faint)"
+    font-family="var(--mono)">${nf(L)} мм</text>
+    <line x1="0" y1="${-padT*0.2}" x2="${L}" y2="${-padT*0.2}" stroke="var(--faint)" stroke-width="${sw}"/>
+    <text x="${-padL*0.5}" y="${W/2}" text-anchor="middle" font-size="${fsBase*.85}" fill="var(--faint)"
+    font-family="var(--mono)" transform="rotate(-90 ${-padL*0.5} ${W/2})">${nf(W)} мм</text>`;
+
+  const vb = `${-padL} ${-padT} ${L+padL+padR} ${W+padT+padB}`;
+  const vars = opt.print
+    ? '--sheet:#fff;--edge:#9aa2ad;--faint:#666;--label:#111;--mono:ui-monospace,Menlo,monospace'
+    : '--sheet:var(--bg);--edge:var(--line2);--faint:var(--muted);--label:var(--ink)';
+  // на экране длинный лист не сжимаем в кашу — включается горизонтальная прокрутка
+  const minW = opt.print ? '' : `min-width:${Math.round(outW)}px;max-width:none;`;
+  return `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg" style="${minW}${vars}">${g}</svg>`;
+}
+
+/* ============================================================
+   ВЫВОД РЕЗУЛЬТАТА
+   ============================================================ */
+let RES = null, activeSheet = 0;
+const ZOOMS = [0.5,0.7,1,1.4,2,2.8,4];
+let zoomI = 2, fitMode = false;
+
+function availW(){
+  const host = document.querySelector('#mapHost');
+  if(host && host.clientWidth > 60) return host.clientWidth - 14;
+  return window.innerWidth<=960 ? Math.max(280, window.innerWidth-58)
+                                : Math.max(560, Math.min(window.innerWidth-420, 1500));
+}
+function mapWidth(r){
+  const nat = Math.min(1800, Math.max(560, (r.input.L/r.input.W)*320));
+  return fitMode ? availW() : Math.max(300, nat*ZOOMS[zoomI]);
+}
+function drawMap(){
+  if(!RES) return;
+  const cuts = $('#ckCuts') ? $('#ckCuts').checked : true;
+  const rem  = $('#ckRem')  ? $('#ckRem').checked  : true;
+  $('#mapHost').innerHTML = svgSheet(RES, RES.sheets[activeSheet], {cuts, remnant:rem, width: mapWidth(RES)});
+}
+
+function cutText(c, res){
+  const isV = c.dir==='V';
+  return {
+    title: isV ? 'Вертикальный рез' : 'Горизонтальный рез',
+    sub: isV ? `упор слева · отметка ${nf(c.pos)} мм` : `упор сверху · отметка ${nf(c.pos)} мм`,
+    len: `${nf(c.len)} мм`
+  };
+}
+function firstCutHint(sh, res){
+  if(!sh.cuts.length) return 'Резы не требуются — детали совпадают с размером листа.';
+  const c = sh.cuts[0];
+  return c.dir==='V'
+    ? `Начните с реза №1: подайте лист длинной стороной к упору и отрежьте по отметке <b>${nf(c.pos)} мм</b> от левого края — лист делится на полосы поперёк длины.`
+    : `Начните с реза №1: отрежьте по отметке <b>${nf(c.pos)} мм</b> от верхнего края — лист делится на продольные полосы, дальше режьте каждую полосу поперёк.`;
+}
+
+function render(){
+  if(!RES){ return; }
+  const r = RES, t = r.totals, sh = r.sheets[activeSheet];
+  const legend = r.input.parts.map((p,i)=>({
+    ...p, color:PALETTE[i%PALETTE.length],
+    placed: r.sheets.reduce((s,x)=>s+x.items.filter(it=>it.pid===i).length,0)
+  }));
+
+  $('#result').innerHTML = `
+    <div class="eyebrow">Текущий раскрой</div>
+    <div class="title-row">
+      <h2>${esc(r.input.order || 'Карта раскроя')}</h2>
+      <div class="acts">
+        <button class="btn" id="btnSave">+ Сохранить</button>
+        <button class="btn dark" id="btnPrint">Печатать</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Использование</div><div class="v">${nf(t.usage*100,2)}%</div>
+        <div class="bar"><i style="width:${Math.min(100,t.usage*100)}%"></i></div></div>
+      <div class="stat"><div class="k">Листов</div><div class="v">${t.sheets}</div>
+        <div class="s">${nf(r.input.L)} × ${nf(r.input.W)} мм</div></div>
+      <div class="stat"><div class="k">Деталей</div><div class="v">${t.items}</div><div class="s">все размещены</div></div>
+      <div class="stat"><div class="k">Резов</div><div class="v">${t.cuts}</div><div class="s">операций гильотины</div></div>
+      <div class="stat"><div class="k">Отход</div><div class="v">${nf((1-t.usage)*100,2)}%</div><div class="s">${m2(t.waste)}</div></div>
+    </div>
+
+    ${r.sheets.length>1 ? `<div class="tabs">${r.sheets.map((s,i)=>
+      `<button class="${i===activeSheet?'on':''}" data-s="${i}">Лист ${i+1} · ${nf(s.usage*100,1)}%</button>`).join('')}</div>` : ''}
+
+    <div class="card mapbox">
+      <div class="maptools">
+        <label><input type="checkbox" id="ckCuts" checked> Резы</label>
+        <label><input type="checkbox" id="ckRem" checked> Остаток</label>
+        <div class="zoom">
+          <button id="zOut" aria-label="Уменьшить масштаб">−</button>
+          <button id="zFit" class="${fitMode?'on':''}">По ширине</button>
+          <button id="zIn" aria-label="Увеличить масштаб">+</button>
+        </div>
+      </div>
+      <div class="scroller" id="mapHost"></div>
+      <div class="scrollhint">Лист ${sh.i} из ${t.sheets} · использование ${nf(sh.usage*100,2)}% · карта прокручивается вбок</div>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <div class="chead"><b>Порядок резов · лист ${sh.i}</b><div class="r">${sh.cuts.length} операций</div></div>
+        ${sh.cuts.map(c=>{const x=cutText(c,r);return `<div class="cut"><div class="n">${c.n}</div>
+          <div class="t"><b>${x.title}</b><span>${x.sub}</span></div><div class="len">${x.len}</div></div>`;}).join('')
+          || '<div class="cut"><div class="t"><b>Резы не требуются</b></div></div>'}
+      </div>
+      <div>
+        <div class="card">
+          <div class="chead"><b>Детали</b><div class="r">цвета карты</div></div>
+          ${legend.map(l=>`<div class="leg"><i style="background:${l.color}"></i>
+            <div class="t"><b>${esc(l.name)}</b><span>${nf(l.len)} × ${nf(l.wid)} · ${l.qty} шт.</span></div>
+            <div class="a">${m2(l.len*l.wid)}</div></div>`).join('')}
+          <div class="leg"><i style="background:transparent;border:1px dashed var(--line2)"></i>
+            <div class="t"><b>Итого деталей</b><span>${t.items} шт.</span></div>
+            <div class="a">${m2(t.used)}</div></div>
+        </div>
+        <div class="note">${firstCutHint(sh, r)}<br><br>
+          <b>Параметры:</b> толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
+          поворот деталей ${r.input.rot?'разрешён':'запрещён'}. Все резы сквозные — раскрой выполним на гильотине.</div>
+      </div>
+    </div>`;
+
+  $('#btnSave').onclick = saveCurrent;
+  $('#btnPrint').onclick = doPrint;
+  document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{activeSheet=+b.dataset.s;render();});
+  $('#ckCuts').onchange = drawMap; $('#ckRem').onchange = drawMap;
+  $('#zIn').onclick  = ()=>{ fitMode=false; zoomI=Math.min(ZOOMS.length-1, zoomI+1); render(); };
+  $('#zOut').onclick = ()=>{ fitMode=false; zoomI=Math.max(0, zoomI-1); render(); };
+  $('#zFit').onclick = ()=>{ fitMode=!fitMode; render(); };
+  drawMap();
+  buildPrint();
+}
+
+function buildPrint(){
+  const r = RES; if(!r) return;
+  const d = new Date().toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
+  $('#printArea').innerHTML = r.sheets.map(sh=>`
+    <div class="psheet">
+      <div class="ph"><b>${esc(r.input.order||'Карта раскроя')}</b>
+        <span>лист ${sh.i} из ${r.totals.sheets} · ${nf(r.input.L)}×${nf(r.input.W)} мм · рез ${nf(r.input.kerf,1)} мм</span>
+        <div class="rr">использование ${nf(sh.usage*100,2)}% · резов ${sh.cuts.length} · ${d}</div></div>
+      ${svgSheet(r, sh, {print:true})}
+      <div class="ptables">
+        <table><thead><tr><th>№</th><th>Рез</th><th>Отметка</th><th>Длина</th></tr></thead><tbody>
+          ${sh.cuts.map(c=>`<tr><td>${c.n}</td><td class="nm">${c.dir==='V'?'вертикальный (от левого края)':'горизонтальный (от верхнего края)'}</td>
+            <td>${nf(c.pos)} мм</td><td>${nf(c.len)} мм</td></tr>`).join('')}
+        </tbody></table>
+        <table><thead><tr><th>Деталь</th><th>Размер</th><th>Шт.</th><th>Площадь</th></tr></thead><tbody>
+          ${r.input.parts.map((p,i)=>{const n=sh.items.filter(it=>it.pid===i).length; return n?
+            `<tr><td class="nm">${esc(p.name)}</td><td>${nf(p.len)}×${nf(p.wid)}</td><td>${n}</td><td>${m2(n*p.len*p.wid)}</td></tr>`:'';}).join('')}
+          <tr><td class="nm"><b>Итого</b></td><td></td><td>${sh.items.length}</td><td>${m2(sh.used)}</td></tr>
+        </tbody></table>
+      </div>
+    </div>`).join('');
+}
+function doPrint(){ buildPrint(); window.print(); }
+
+/* ---------------- расчёт ---------------- */
+function calculate(){
+  const inp = readForm();
+  $('#formErr').innerHTML = '';
+  if(!(inp.L>0 && inp.W>0)){ $('#formErr').innerHTML = '<div class="err">Укажите длину и ширину листа.</div>'; return; }
+  const res = optimize(inp);
+  if(res.error){ $('#formErr').innerHTML = `<div class="err">${esc(res.error)}</div>`; return; }
+  RES = res; activeSheet = 0;
+  localStorage.setItem(LS_LAST, JSON.stringify(inp));
+  render();
+  setTab('out');
+  if(window.innerWidth>960) $('#result').scrollIntoView({block:'nearest'});
+}
+
+/* ---------------- история ---------------- */
+const getHist = () => { try{ return JSON.parse(localStorage.getItem(LS_HIST)||'[]'); }catch(e){ return []; } };
+const setHist = h => { localStorage.setItem(LS_HIST, JSON.stringify(h.slice(0,60))); histCount(); };
+function histCount(){ $('#histCount').textContent = getHist().length; }
+function saveCurrent(){
+  if(!RES) return;
+  const h = getHist();
+  h.unshift({
+    id: Date.now(), ts: new Date().toISOString(), input: RES.input,
+    sum: {sheets:RES.totals.sheets, items:RES.totals.items, cuts:RES.totals.cuts, usage:RES.totals.usage}
+  });
+  setHist(h); renderHist();
+  const b = $('#btnSave'); if(b){ b.textContent='✓ Сохранено'; setTimeout(()=>b.textContent='+ Сохранить',1600); }
+}
+function renderHist(){
+  const h = getHist();
+  $('#histList').innerHTML = h.length ? h.map(e=>`
+    <div class="hitem"><div class="t">
+      <b>${esc(e.input.order || ('Раскрой ' + nf(e.input.L)+'×'+nf(e.input.W)))}</b>
+      <span>${new Date(e.ts).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'})} ·
+      ${e.sum.sheets} л. · ${e.sum.items} дет. · ${e.sum.cuts} рез. · ${nf(e.sum.usage*100,1)}%</span></div>
+      <button class="btn go" data-load="${e.id}">Открыть</button>
+      <button class="del" data-del="${e.id}" title="Удалить">✕</button></div>`).join('')
+    : '<div style="padding:26px 10px;text-align:center;color:var(--muted);font-size:13.5px">История пуста.<br>Рассчитайте раскрой и нажмите «Сохранить».</div>';
+  $('#histList').querySelectorAll('[data-load]').forEach(b=>b.onclick=()=>{
+    const e = getHist().find(x=>x.id==b.dataset.load); if(!e) return;
+    fillForm(e.input); refreshCount(); closeDrawer(); calculate();
+  });
+  $('#histList').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+    setHist(getHist().filter(x=>x.id!=b.dataset.del)); renderHist();
+  });
+}
+const openDrawer = ()=>{ renderHist(); $('#drawer').classList.add('on'); };
+const closeDrawer = ()=> $('#drawer').classList.remove('on');
+function setTab(t){ document.body.dataset.tab = t; window.scrollTo({top:0}); }
+
+/* ---------------- PWA: иконка и «на экран Домой» ---------------- */
+function installMeta(){
+  if(document.querySelector('link[rel="manifest"]')) return;   // на хостинге манифест статический
+  try{
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const x = c.getContext('2d');
+    x.fillStyle = '#12604f'; x.fillRect(0,0,512,512);
+    x.fillStyle = '#e0a32e'; x.fillRect(56,56,400,400);
+    x.strokeStyle = '#12604f'; x.lineWidth = 18;
+    x.beginPath(); x.moveTo(56,220); x.lineTo(456,220); x.moveTo(250,56); x.lineTo(250,220); x.stroke();
+    x.fillStyle = '#12604f'; x.font = '700 130px system-ui,sans-serif'; x.textAlign='center';
+    x.fillText('MC', 256, 390);
+    const png = c.toDataURL('image/png');
+    const link = (rel, href, extra={}) => { const l = document.createElement('link'); l.rel = rel; l.href = href;
+      Object.assign(l, extra); document.head.appendChild(l); };
+    link('apple-touch-icon', png); link('icon', png);
+    const mf = {name:'MetalCut — раскрой металла', short_name:'MetalCut', display:'standalone',
+      orientation:'any', background_color:'#f3f4f6', theme_color:'#12604f', start_url:'.', scope:'.',
+      icons:[{src:png, sizes:'512x512', type:'image/png', purpose:'any'}]};
+    link('manifest', URL.createObjectURL(new Blob([JSON.stringify(mf)], {type:'application/manifest+json'})));
+  }catch(e){}
+}
+
+/* ---------------- подсказка «на экран Домой» ---------------- */
+function a2hsTip(){
+  const el = $('#a2hs'); if(!el) return;
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if(standalone || window.innerWidth>760 || localStorage.getItem('metalcut:a2hs')) return;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+              (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  el.innerHTML = `<div><b>Добавьте на экран «Домой»</b><br>${ios
+    ? 'Кнопка «Поделиться» в Safari → «На экран „Домой“». Откроется как приложение, без адресной строки.'
+    : 'Меню браузера (⋮) → «Установить приложение» или «Добавить на главный экран».'}</div>
+    <button aria-label="Скрыть подсказку">✕</button>`;
+  el.classList.add('show');
+  el.querySelector('button').onclick = ()=>{ el.classList.remove('show'); localStorage.setItem('metalcut:a2hs','1'); };
+}
+
+/* ---------------- старт ---------------- */
+(function init(){
+  zoomI = window.innerWidth < 700 ? 1 : 2;
+  let rt; addEventListener('resize', ()=>{ clearTimeout(rt); rt = setTimeout(()=>{ if(fitMode) drawMap(); }, 250); });
+  const th = localStorage.getItem(LS_THEME); if(th) document.documentElement.dataset.theme = th;
+  $('#btnTheme').onclick = ()=>{
+    const cur = document.documentElement.dataset.theme
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const nx = cur==='dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = nx; localStorage.setItem(LS_THEME, nx);
+  };
+  $('#addRow').onclick = ()=>addRow();
+  $('#btnCalc').onclick = calculate;
+  $('#btnHistory').onclick = openDrawer;
+  $('#btnPrintTop').onclick = doPrint;
+  $('#clearHist').onclick = ()=>{ if(confirm('Удалить всю историю раскроев?')){ setHist([]); renderHist(); } };
+  document.addEventListener('keydown', e=>{
+    if((e.metaKey||e.ctrlKey) && e.key==='Enter'){ e.preventDefault(); calculate(); }
+    if(e.key==='Escape') closeDrawer();
+  });
+
+  let last = null; try{ last = JSON.parse(localStorage.getItem(LS_LAST)); }catch(e){}
+  if(last && last.parts && last.parts.length) fillForm(last);
+  else fillForm({L:6000, W:1500, kerf:0, trim:0, rot:true, parts:[
+    {name:'Панель', len:800, wid:600, qty:2},
+    {name:'Полоса', len:1200, wid:300, qty:2},
+    {name:'Деталь', len:500, wid:400, qty:3}
+  ]});
+  refreshCount(); histCount(); installMeta(); a2hsTip();
+  calculate();
+  if(window.innerWidth<=960) setTab('in');
+})();
+</script>
+<script>
+if('serviceWorker' in navigator)
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+</script>
+</body>
+</html>
