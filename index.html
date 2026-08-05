@@ -91,6 +91,8 @@ input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
 .addrow:hover{border-color:var(--accent);color:var(--ink)}
 .calc{width:100%;margin-top:16px;padding:14px;font-size:15.5px;justify-content:center}
 .hint{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+.newcut{width:100%;justify-content:center;margin-bottom:18px;padding:11px;font-size:14px;color:var(--ink2)}
+.newcut:hover{border-color:var(--muted);color:var(--ink)}
 .photo-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;
   cursor:pointer;font-size:14.5px;background:var(--bg);border-style:dashed}
 .photo-btn:active{transform:scale(.99)}
@@ -272,6 +274,7 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
   <!-- ================= INPUT ================= -->
   <aside class="panel">
     <div class="a2hs" id="a2hs"></div>
+    <button class="btn newcut" id="btnNew">↺ Новый раскрой</button>
     <div class="sec">
       <div class="sec-h"><i>01</i><h3>Исходный лист</h3><div class="unit">мм</div></div>
       <label class="f"><span>Название заказа <em>необязательно</em></span>
@@ -853,6 +856,20 @@ function calculate(){
   if(window.innerWidth>960) $('#result').scrollIntoView({block:'nearest'});
 }
 
+function newCutting(){
+  const cur = readForm();
+  const hasData = cur.order || cur.parts.length > 0;
+  if(hasData && !confirm('Начать новый раскрой? Название заказа и список деталей очистятся (размер листа и параметры реза останутся).')) return;
+  $('#orderName').value = '';
+  $('#rows').innerHTML = ''; addRow(); refreshCount();
+  $('#formErr').innerHTML = '';
+  RES = null; activeSheet = 0;
+  localStorage.removeItem(LS_LAST);
+  $('#result').innerHTML = `<div class="empty"><div>Заполните лист и детали слева, затем нажмите «Рассчитать раскрой».<br>Здесь появится карта раскроя, порядок резов гильотины и статистика.</div></div>`;
+  setTab('in');
+  $('#orderName').focus();
+}
+
 /* ---------------- история ---------------- */
 const getHist = () => { try{ return JSON.parse(localStorage.getItem(LS_HIST)||'[]'); }catch(e){ return []; } };
 const setHist = h => { localStorage.setItem(LS_HIST, JSON.stringify(h.slice(0,60))); histCount(); };
@@ -1045,6 +1062,7 @@ async function recognizeSketch(file){
   $('#addRow').onclick = ()=>addRow();
   $('#btnCalc').onclick = calculate;
   $('#photoInput').onchange = (e) => { const f = e.target.files[0]; if(f) recognizeSketch(f); e.target.value = ''; };
+  $('#btnNew').onclick = newCutting;
   $('#btnHistory').onclick = openDrawer;
   $('#btnPrintTop').onclick = doPrint;
   $('#clearHist').onclick = ()=>{ if(confirm('Удалить всю историю раскроев?')){ setHist([]); renderHist(); } };
