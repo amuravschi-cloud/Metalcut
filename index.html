@@ -850,10 +850,18 @@ function render(){
     : `<div class="stat"><div class="k">Резов</div><div class="v">${t.cuts}</div><div class="s">операций гильотины</div></div>`;
   const cutsPanel = isPlasma
     ? `<div class="chead"><b>Резка контуров · лист ${sh.i}</b><div class="r">${fmtLen(sh.cutLen)}</div></div>
-       <div class="cut"><div class="t"><b>Суммарная длина реза</b><span>по контуру всех деталей на этом листе, общие границы не задваиваются</span></div>
-         <div class="len">${fmtLen(sh.cutLen)}</div></div>
-       <div class="cut"><div class="t"><b>Деталей на листе</b><span>порядок обхода выбирает оператор/ЧПУ</span></div>
-         <div class="len">${sh.items.length} шт.</div></div>`
+       ${r.input.parts.map((p,i)=>{
+         const n = sh.items.filter(it=>it.pid===i).length;
+         if(!n) return '';
+         const color = PALETTE[i%PALETTE.length];
+         const contour = 2*(p.len+p.wid)*n;
+         return `<div class="leg"><i style="background:${color}"></i>
+           <div class="t"><b>${esc(p.name)}</b><span>${nf(p.len)} × ${nf(p.wid)} · ${n} шт.</span></div>
+           <div class="a">${fmtLen(contour)}</div></div>`;
+       }).join('')}
+       <div class="leg"><i style="background:transparent;border:1px dashed var(--line2)"></i>
+         <div class="t"><b>Суммарно на листе</b><span>общие границы двух деталей режутся один раз, поэтому итог чуть меньше суммы строк</span></div>
+         <div class="a">${fmtLen(sh.cutLen)}</div></div>`
     : `<div class="chead"><b>Порядок резов · лист ${sh.i}</b><div class="r">${sh.cuts.length} операций</div></div>
        ${sh.cuts.map(c=>{const x=cutText(c,r);return `<div class="cut"><div class="n">${c.n}</div>
          <div class="t"><b>${x.title}</b><span>${x.sub}</span></div><div class="len">${x.len}</div></div>`;}).join('')
