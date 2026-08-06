@@ -576,6 +576,37 @@ function plasmaCutLength(items, L, W){
   }
   return len;
 }
+
+// Только для отображения при плазме: два свободных куска, разделённые лишь
+// зазором на рез (а не полноценным гильотинным резом на всю длину полосы),
+// физически представляют собой один цельный обрезок — плазме не нужно
+// резать по всей длине, только вокруг самих деталей. Гильотины это не
+// касается: там зазор между двумя такими кусками — реальный след реза,
+// разделяющий их на два отдельных куска материала.
+function mergeFreeForDisplay(free, kerf){
+  let list = free.map(f=>({...f}));
+  const TOL = 0.6;
+  let changed = true;
+  while(changed){
+    changed = false;
+    outer: for(let i=0;i<list.length;i++){
+      for(let j=i+1;j<list.length;j++){
+        const a=list[i], b=list[j];
+        if(Math.abs(a.y-b.y)<TOL && Math.abs(a.h-b.h)<TOL){
+          const gap = b.x-(a.x+a.w), gap2 = a.x-(b.x+b.w);
+          if(gap>=-TOL && gap<=kerf+TOL){ list[i]={x:a.x,y:a.y,w:(b.x+b.w)-a.x,h:a.h}; list.splice(j,1); changed=true; break outer; }
+          if(gap2>=-TOL && gap2<=kerf+TOL){ list[i]={x:b.x,y:a.y,w:(a.x+a.w)-b.x,h:a.h}; list.splice(j,1); changed=true; break outer; }
+        }
+        if(Math.abs(a.x-b.x)<TOL && Math.abs(a.w-b.w)<TOL){
+          const gap = b.y-(a.y+a.h), gap2 = a.y-(b.y+b.h);
+          if(gap>=-TOL && gap<=kerf+TOL){ list[i]={x:a.x,y:a.y,w:a.w,h:(b.y+b.h)-a.y}; list.splice(j,1); changed=true; break outer; }
+          if(gap2>=-TOL && gap2<=kerf+TOL){ list[i]={x:a.x,y:b.y,w:a.w,h:(a.y+a.h)-b.y}; list.splice(j,1); changed=true; break outer; }
+        }
+      }
+    }
+  }
+  return list;
+}
 function optimize(inp){
   const SW = inp.L - 2*inp.trim, SH = inp.W - 2*inp.trim;
   if(!(SW>0 && SH>0)) return {error:'Обрезка кромки больше размеров листа.'};
@@ -718,9 +749,10 @@ function svgSheet(res, sh, opt={}){
   }
   const MONO = 'var(--mono)', SANS = 'system-ui,-apple-system,sans-serif';
 
-  // деловой остаток
+  // деловой остаток (для плазмы — со слиянием кусков, разделённых только зазором на рез)
   if(opt.remnant!==false){
-    sh.free.filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).forEach(f=>{
+    const freeForShow = res.input.cutMethod==='plasma' ? mergeFreeForDisplay(sh.free, res.input.kerf) : sh.free;
+    freeForShow.filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).forEach(f=>{
       g += `<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="none" stroke="var(--edge)"
         stroke-width="${sw}" stroke-dasharray="${sw*6} ${sw*5}"/>`;
       g += label(f, [
