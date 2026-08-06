@@ -75,6 +75,11 @@ input:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:tra
 input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .chk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink2);margin:2px 0 10px}
+.chk em{font-style:normal;color:var(--muted);font-size:12px}
+.segmented{display:flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden;margin-bottom:12px}
+.segmented button{flex:1;border:0;background:var(--card);color:var(--ink2);padding:9px 8px;font-size:13.5px}
+.segmented button+button{border-left:1px solid var(--line2)}
+.segmented button.on{background:var(--green);color:#fff;font-weight:600}
 .chk input{width:17px;height:17px;accent-color:var(--green)}
 
 .ptable{border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -117,6 +122,8 @@ input::placeholder{font-family:system-ui;color:var(--muted);opacity:.7}
 .vp-actions .btn{flex:1;justify-content:center;padding:10px;font-size:13.5px}
 .err{background:#fdecec;border:1px solid #f3bcbc;color:#8d2020;border-radius:9px;padding:10px 12px;font-size:13px;margin-top:12px}
 @media (prefers-color-scheme:dark){.err{background:#3a1a1a;border-color:#6b2d2d;color:#f3b9b9}}
+.warn{background:#fdf3e0;border:1px solid #edc879;color:#7a5a10;border-radius:9px;padding:10px 12px;font-size:13px;margin-top:12px;line-height:1.5}
+@media (prefers-color-scheme:dark){.warn{background:#3a2f10;border-color:#6b5420;color:#f0d896}}
 
 /* ---------- result ---------- */
 .eyebrow{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
@@ -296,7 +303,14 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
         <label class="f"><span>Толщина реза</span><input type="number" id="kerf" value="0" min="0" step="0.1" inputmode="decimal"></label>
         <label class="f"><span>Обрезка кромки</span><input type="number" id="trim" value="0" min="0" step="1" inputmode="decimal"></label>
       </div>
+      <label class="f"><span>Способ резки</span>
+        <div class="segmented" id="cutMethodSeg">
+          <button type="button" class="on" data-v="guillotine">Гильотина</button>
+          <button type="button" data-v="plasma">Плазма</button>
+        </div>
+      </label>
       <label class="chk"><input type="checkbox" id="allowRot" checked> Разрешить поворот деталей на 90°</label>
+      <label class="chk"><input type="checkbox" id="allowThin"> Разрешить остатки и детали менее 500 мм <em>(закладные)</em></label>
     </div>
 
     <div class="sec">
@@ -395,13 +409,20 @@ function readForm(){
     kerf: Math.max(0, parseFloat($('#kerf').value)||0),
     trim: Math.max(0, parseFloat($('#trim').value)||0),
     rot: $('#allowRot').checked,
+    cutMethod: $('#cutMethodSeg .on')?.dataset.v || 'guillotine',
+    allowThin: $('#allowThin').checked,
     parts
   };
 }
 function fillForm(inp){
   $('#orderName').value = inp.order||''; $('#sheetL').value = inp.L; $('#sheetW').value = inp.W;
   $('#kerf').value = inp.kerf; $('#trim').value = inp.trim; $('#allowRot').checked = !!inp.rot;
+  $('#allowThin').checked = !!inp.allowThin;
+  setCutMethod(inp.cutMethod === 'plasma' ? 'plasma' : 'guillotine');
   $('#rows').innerHTML=''; (inp.parts||[]).forEach(addRow); if(!$('#rows').children.length) addRow();
+}
+function setCutMethod(v){
+  document.querySelectorAll('#cutMethodSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
 }
 function refreshCount(){
   const n = readForm().parts.reduce((s,p)=>s+p.qty,0);
@@ -444,6 +465,18 @@ function findSpot(root, it, rot){
   }
   return best;
 }
+const REMNANT_STEP = 500; // предпочитаемая кратность делового остатка, мм
+
+// Геометрия раскладки НЕ зависит от правила 500 мм — оно намеренно не
+// вмешивается в сам разрез. Ранняя версия пробовала "заранее" резервировать
+// кратный остаток на каждом шаге и на практике проваливала использование
+// листа (проверено: 83%→42% на смешанном наборе деталей), потому что
+// съедала промежутки, в которые ещё могли встать мелкие детали, до того,
+// как алгоритм успевал их туда предложить. Вместо этого правило 500 мм
+// работает как критерий ВЫБОРА среди уже просчитанных вариантов раскладки
+// (см. optimize(), remnantScore) — среди одинаково экономных раскладок
+// выбирается та, где деловой остаток чище, но раскладка никогда не
+// становится хуже по расходу металла ради этого.
 function place(n, item, pw, ph, rule, k){
   const {x,y,w,h} = n;
   const restW = w-pw, restH = h-ph;
@@ -503,6 +536,46 @@ function runPack(items, SW, SH, ox, oy, k, rot, rule){
   }
   return sheets;
 }
+
+// Суммарная длина реза для плазмы: объединяем рёбра всех деталей в
+// уникальные отрезки (общую границу двух деталей режем один раз), не
+// считаем рёбра, совпадающие с физическим краем листа — там резать не надо.
+function plasmaCutLength(items, L, W){
+  const vert = {}, horiz = {}; // ключ — координата линии, значение — список [from,to]
+  const addSeg = (map, key, a, b) => {
+    key = Math.round(key*100)/100;
+    (map[key] = map[key] || []).push([Math.min(a,b), Math.max(a,b)]);
+  };
+  items.forEach(it => {
+    addSeg(vert, it.x, it.y, it.y+it.h);
+    addSeg(vert, it.x+it.w, it.y, it.y+it.h);
+    addSeg(horiz, it.y, it.x, it.x+it.w);
+    addSeg(horiz, it.y+it.h, it.x, it.x+it.w);
+  });
+  const unionLen = segs => {
+    segs.sort((a,b)=>a[0]-b[0]);
+    let total=0, curA=null, curB=null;
+    for(const [a,b] of segs){
+      if(curA===null){ curA=a; curB=b; continue; }
+      if(a <= curB + EPS){ curB = Math.max(curB,b); }
+      else { total += curB-curA; curA=a; curB=b; }
+    }
+    if(curA!==null) total += curB-curA;
+    return total;
+  };
+  let len = 0;
+  for(const key in vert){
+    const x = +key;
+    if(x <= EPS || x >= L-EPS) continue;     // совпадает с краем листа — не режем
+    len += unionLen(vert[key]);
+  }
+  for(const key in horiz){
+    const y = +key;
+    if(y <= EPS || y >= W-EPS) continue;
+    len += unionLen(horiz[key]);
+  }
+  return len;
+}
 function optimize(inp){
   const SW = inp.L - 2*inp.trim, SH = inp.W - 2*inp.trim;
   if(!(SW>0 && SH>0)) return {error:'Обрезка кромки больше размеров листа.'};
@@ -529,6 +602,16 @@ function optimize(inp){
     height:(a,b)=> b.h-a.h || b.w-a.w,
     width:(a,b)=> b.w-a.w || b.h-a.h
   };
+  // "Неопрятный" остаток — кусок площадью от полуметра, у которого НИ одна
+  // сторона не кратна 500 мм (значит его неудобно завести на склад как
+  // мерный обрезок). Среди раскладок с ОДИНАКОВЫМ числом листов алгоритм
+  // предпочитает вариант с меньшим числом таких кусков — но никогда не
+  // жертвует ради этого количеством листов или расходом металла, это
+  // только выбор среди уже одинаково экономных вариантов.
+  const isAwkward = f => (f.w*f.h >= 250000) &&
+    (Math.min(f.w%REMNANT_STEP, REMNANT_STEP-(f.w%REMNANT_STEP)) > 0.5) &&
+    (Math.min(f.h%REMNANT_STEP, REMNANT_STEP-(f.h%REMNANT_STEP)) > 0.5);
+  const preferClean = !inp.allowThin;
   let best=null;
   for(const sk of Object.keys(sorts)){
     const list = items.slice().sort(sorts[sk]);
@@ -538,7 +621,8 @@ function optimize(inp){
       const cuts = sheets.reduce((s,r)=>s+collectCuts(r).length,0);
       const lastFree = collectFree(sheets[sheets.length-1]);
       const remnant = lastFree.reduce((m,f)=>Math.max(m,f.w*f.h),0);
-      const score = [sheets.length, -remnant, cuts];
+      const awkward = preferClean ? sheets.reduce((s,r)=>s+collectFree(r).filter(isAwkward).length,0) : 0;
+      const score = [sheets.length, awkward, -remnant, cuts];
       if(!best || cmp(score,best.score)<0) best = {sheets, score, sk, rk, cuts};
     }
   }
@@ -547,7 +631,8 @@ function optimize(inp){
   const sheets = best.sheets.map((root,i)=>{
     const its = collectItems(root), cuts = collectCuts(root), free = collectFree(root);
     const used = its.reduce((s,t)=>s+t.w*t.h,0);
-    return {i:i+1, root, items:its, cuts, free, used, usage: used/(inp.L*inp.W)};
+    const cutLen = plasmaCutLength(its, inp.L, inp.W);
+    return {i:i+1, root, items:its, cuts, free, used, usage: used/(inp.L*inp.W), cutLen};
   });
   const totalUsed = sheets.reduce((s,x)=>s+x.used,0);
   const totalArea = sheets.length*inp.L*inp.W;
@@ -557,6 +642,7 @@ function optimize(inp){
       sheets: sheets.length,
       items: items.length,
       cuts: sheets.reduce((s,x)=>s+x.cuts.length,0),
+      cutLen: sheets.reduce((s,x)=>s+x.cutLen,0),
       used: totalUsed, area: totalArea,
       usage: totalUsed/totalArea,
       waste: totalArea-totalUsed
@@ -741,20 +827,37 @@ function cutText(c, res){
   };
 }
 function firstCutHint(sh, res){
+  if(res.input.cutMethod === 'plasma')
+    return 'Плазма режет по контуру каждой детали — строгий порядок резов не важен, важна суммарная длина реза (для расчёта времени и стоимости).';
   if(!sh.cuts.length) return 'Резы не требуются — детали совпадают с размером листа.';
   const c = sh.cuts[0];
   return c.dir==='V'
     ? `Начните с реза №1: подайте лист длинной стороной к упору и отрежьте по отметке <b>${nf(c.pos)} мм</b> от левого края — лист делится на полосы поперёк длины.`
     : `Начните с реза №1: отрежьте по отметке <b>${nf(c.pos)} мм</b> от верхнего края — лист делится на продольные полосы, дальше режьте каждую полосу поперёк.`;
 }
+const fmtLen = mm => nf(mm/1000, mm<10000?2:1) + ' м';
 
 function render(){
   if(!RES){ return; }
   const r = RES, t = r.totals, sh = r.sheets[activeSheet];
+  const isPlasma = r.input.cutMethod === 'plasma';
   const legend = r.input.parts.map((p,i)=>({
     ...p, color:PALETTE[i%PALETTE.length],
     placed: r.sheets.reduce((s,x)=>s+x.items.filter(it=>it.pid===i).length,0)
   }));
+  const methodStat = isPlasma
+    ? `<div class="stat"><div class="k">Длина реза</div><div class="v">${fmtLen(t.cutLen)}</div><div class="s">плазма, суммарно</div></div>`
+    : `<div class="stat"><div class="k">Резов</div><div class="v">${t.cuts}</div><div class="s">операций гильотины</div></div>`;
+  const cutsPanel = isPlasma
+    ? `<div class="chead"><b>Резка контуров · лист ${sh.i}</b><div class="r">${fmtLen(sh.cutLen)}</div></div>
+       <div class="cut"><div class="t"><b>Суммарная длина реза</b><span>по контуру всех деталей на этом листе, общие границы не задваиваются</span></div>
+         <div class="len">${fmtLen(sh.cutLen)}</div></div>
+       <div class="cut"><div class="t"><b>Деталей на листе</b><span>порядок обхода выбирает оператор/ЧПУ</span></div>
+         <div class="len">${sh.items.length} шт.</div></div>`
+    : `<div class="chead"><b>Порядок резов · лист ${sh.i}</b><div class="r">${sh.cuts.length} операций</div></div>
+       ${sh.cuts.map(c=>{const x=cutText(c,r);return `<div class="cut"><div class="n">${c.n}</div>
+         <div class="t"><b>${x.title}</b><span>${x.sub}</span></div><div class="len">${x.len}</div></div>`;}).join('')
+         || '<div class="cut"><div class="t"><b>Резы не требуются</b></div></div>'}`;
 
   $('#result').innerHTML = `
     <div class="eyebrow">Текущий раскрой</div>
@@ -772,7 +875,7 @@ function render(){
       <div class="stat"><div class="k">Листов</div><div class="v">${t.sheets}</div>
         <div class="s">${nf(r.input.L)} × ${nf(r.input.W)} мм</div></div>
       <div class="stat"><div class="k">Деталей</div><div class="v">${t.items}</div><div class="s">все размещены</div></div>
-      <div class="stat"><div class="k">Резов</div><div class="v">${t.cuts}</div><div class="s">операций гильотины</div></div>
+      ${methodStat}
       <div class="stat"><div class="k">Отход</div><div class="v">${nf((1-t.usage)*100,2)}%</div><div class="s">${m2(t.waste)}</div></div>
     </div>
 
@@ -795,10 +898,7 @@ function render(){
 
     <div class="cols">
       <div class="card">
-        <div class="chead"><b>Порядок резов · лист ${sh.i}</b><div class="r">${sh.cuts.length} операций</div></div>
-        ${sh.cuts.map(c=>{const x=cutText(c,r);return `<div class="cut"><div class="n">${c.n}</div>
-          <div class="t"><b>${x.title}</b><span>${x.sub}</span></div><div class="len">${x.len}</div></div>`;}).join('')
-          || '<div class="cut"><div class="t"><b>Резы не требуются</b></div></div>'}
+        ${cutsPanel}
       </div>
       <div>
         <div class="card">
@@ -811,8 +911,9 @@ function render(){
             <div class="a">${m2(t.used)}</div></div>
         </div>
         <div class="note">${firstCutHint(sh, r)}<br><br>
-          <b>Параметры:</b> толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
-          поворот деталей ${r.input.rot?'разрешён':'запрещён'}. Все резы сквозные — раскрой выполним на гильотине.</div>
+          <b>Параметры:</b> способ резки — ${isPlasma?'плазма':'гильотина'}; толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
+          поворот деталей ${r.input.rot?'разрешён':'запрещён'}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
+          ${isPlasma?'':'Все резы сквозные — раскрой выполним на гильотине.'}</div>
       </div>
     </div>`;
 
@@ -829,17 +930,24 @@ function render(){
 
 function buildPrint(){
   const r = RES; if(!r) return;
+  const isPlasma = r.input.cutMethod === 'plasma';
   const d = new Date().toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
   $('#printArea').innerHTML = r.sheets.map(sh=>`
     <div class="psheet">
       <div class="ph"><b>${esc(r.input.order||'Карта раскроя')}</b>
-        <span>лист ${sh.i} из ${r.totals.sheets} · ${nf(r.input.L)}×${nf(r.input.W)} мм · рез ${nf(r.input.kerf,1)} мм</span>
-        <div class="rr">использование ${nf(sh.usage*100,2)}% · резов ${sh.cuts.length} · ${d}</div></div>
+        <span>лист ${sh.i} из ${r.totals.sheets} · ${nf(r.input.L)}×${nf(r.input.W)} мм · рез ${nf(r.input.kerf,1)} мм · ${isPlasma?'плазма':'гильотина'}</span>
+        <div class="rr">использование ${nf(sh.usage*100,2)}% · ${isPlasma?`длина реза ${fmtLen(sh.cutLen)}`:`резов ${sh.cuts.length}`} · ${d}</div></div>
       ${svgSheet(r, sh, {print:true})}
       <div class="ptables">
-        <table><thead><tr><th>№</th><th>Рез</th><th>Отметка</th><th>Длина</th></tr></thead><tbody>
-          ${sh.cuts.map(c=>`<tr><td>${c.n}</td><td class="nm">${c.dir==='V'?'вертикальный (от левого края)':'горизонтальный (от верхнего края)'}</td>
-            <td>${nf(c.pos)} мм</td><td>${nf(c.len)} мм</td></tr>`).join('')}
+        <table><thead><tr>${isPlasma
+            ? '<th>Деталь</th><th>Размер</th><th>Шт.</th><th>Длина контура</th>'
+            : '<th>№</th><th>Рез</th><th>Отметка</th><th>Длина</th>'}</tr></thead><tbody>
+          ${isPlasma
+            ? r.input.parts.map((p,i)=>{const n=sh.items.filter(it=>it.pid===i).length; return n?
+                `<tr><td class="nm">${esc(p.name)}</td><td>${nf(p.len)}×${nf(p.wid)}</td><td>${n}</td><td>${fmtLen(2*(p.len+p.wid)*n)}</td></tr>`:'';}).join('')
+              + `<tr><td class="nm"><b>Суммарно на листе</b></td><td></td><td></td><td><b>${fmtLen(sh.cutLen)}</b></td></tr>`
+            : sh.cuts.map(c=>`<tr><td>${c.n}</td><td class="nm">${c.dir==='V'?'вертикальный (от левого края)':'горизонтальный (от верхнего края)'}</td>
+                <td>${nf(c.pos)} мм</td><td>${nf(c.len)} мм</td></tr>`).join('')}
         </tbody></table>
         <table><thead><tr><th>Деталь</th><th>Размер</th><th>Шт.</th><th>Площадь</th></tr></thead><tbody>
           ${r.input.parts.map((p,i)=>{const n=sh.items.filter(it=>it.pid===i).length; return n?
@@ -858,6 +966,11 @@ function calculate(){
   if(!(inp.L>0 && inp.W>0)){ $('#formErr').innerHTML = '<div class="err">Укажите длину и ширину листа.</div>'; return; }
   const res = optimize(inp);
   if(res.error){ $('#formErr').innerHTML = `<div class="err">${esc(res.error)}</div>`; return; }
+  if(!inp.allowThin){
+    const small = inp.parts.filter(p => Math.min(p.len,p.wid) < REMNANT_STEP);
+    if(small.length) $('#formErr').innerHTML = `<div class="warn">Деталь мельче 500 мм по стороне: ${esc(small.map(p=>p.name).join(', '))}.
+      Это не мешает расчёту, но если это закладные — включите «Разрешить остатки и детали менее 500 мм».</div>`;
+  }
   RES = res; activeSheet = 0;
   localStorage.setItem(LS_LAST, JSON.stringify(inp));
   render();
@@ -1105,6 +1218,7 @@ function applyVisionResult(){
     document.documentElement.dataset.theme = nx; localStorage.setItem(LS_THEME, nx);
   };
   $('#addRow').onclick = ()=>addRow();
+  $('#cutMethodSeg').onclick = e => { const b = e.target.closest('button'); if(b) setCutMethod(b.dataset.v); };
   $('#btnCalc').onclick = calculate;
   $('#photoInput').onchange = (e) => { const f = e.target.files[0]; if(f) recognizeSketch(f); e.target.value = ''; };
   $('#btnNew').onclick = newCutting;
