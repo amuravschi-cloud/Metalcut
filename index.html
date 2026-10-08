@@ -45,6 +45,7 @@ h1,h2,h3{margin:0}
 .btn.dark{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .btn .pill{background:var(--line);border-radius:20px;padding:1px 7px;font-size:11.5px;font-family:var(--mono)}
 .btn.icon{padding:8px 10px}
+.btn.on{background:var(--green);border-color:var(--green);color:#fff}
 
 /* ---------- layout ---------- */
 .wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:0;align-items:start}
@@ -310,6 +311,7 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
         </div>
       </label>
       <label class="chk"><input type="checkbox" id="allowRot" checked> Разрешить поворот деталей на 90°</label>
+      <label class="chk"><input type="checkbox" id="forceRot"> Повернуть все детали на 90° <em>(другой раскрой)</em></label>
       <label class="chk"><input type="checkbox" id="allowThin"> Разрешить остатки и детали менее 500 мм <em>(закладные)</em></label>
     </div>
 
@@ -409,6 +411,7 @@ function readForm(){
     kerf: Math.max(0, parseFloat($('#kerf').value)||0),
     trim: Math.max(0, parseFloat($('#trim').value)||0),
     rot: $('#allowRot').checked,
+    forceRot: $('#forceRot').checked,
     cutMethod: $('#cutMethodSeg .on')?.dataset.v || 'guillotine',
     allowThin: $('#allowThin').checked,
     parts
@@ -418,6 +421,7 @@ function fillForm(inp){
   $('#orderName').value = inp.order||''; $('#sheetL').value = inp.L; $('#sheetW').value = inp.W;
   $('#kerf').value = inp.kerf; $('#trim').value = inp.trim; $('#allowRot').checked = !!inp.rot;
   $('#allowThin').checked = !!inp.allowThin;
+  $('#forceRot').checked = !!inp.forceRot;
   setCutMethod(inp.cutMethod === 'plasma' ? 'plasma' : 'guillotine');
   $('#rows').innerHTML=''; (inp.parts||[]).forEach(addRow); if(!$('#rows').children.length) addRow();
 }
@@ -611,17 +615,34 @@ function optimize(inp){
   const SW = inp.L - 2*inp.trim, SH = inp.W - 2*inp.trim;
   if(!(SW>0 && SH>0)) return {error:'Обрезка кромки больше размеров листа.'};
 
+  // Принудительный поворот: каждая деталь кладётся повёрнутой на 90° и
+  // фиксируется в этом положении (авто-поворот упаковщика выключается, иначе
+  // он сам вернул бы детали в прежнее положение и раскрой не изменился бы).
+  // Деталь, которая в повёрнутом виде на лист не влезает, остаётся как была.
+  const forced = !!inp.forceRot;
+  const notRotated = [];
+  const orient = inp.parts.map(p=>{
+    if(forced){
+      if(p.wid<=SW+EPS && p.len<=SH+EPS) return {w:p.wid, h:p.len, forced:true};
+      notRotated.push(p.name);
+    }
+    return {w:p.len, h:p.wid, forced:false};
+  });
+
   // разворачиваем количества в отдельные экземпляры
   const items = [];
   inp.parts.forEach((p,pi)=>{
-    for(let q=0;q<p.qty;q++) items.push({pid:pi, name:p.name, w:p.len, h:p.wid, area:p.len*p.wid, idx:items.length+1});
+    const o = orient[pi];
+    for(let q=0;q<p.qty;q++) items.push({pid:pi, name:p.name, w:o.w, h:o.h, area:p.len*p.wid, forced:o.forced, idx:items.length+1});
   });
   if(!items.length) return {error:'Добавьте хотя бы одну деталь с размерами и количеством.'};
 
   // проверка «в принципе помещается»
-  const bad = inp.parts.filter(p=>{
-    const fit = (p.len<=SW+EPS && p.wid<=SH+EPS);
-    const fitR = inp.rot && (p.wid<=SW+EPS && p.len<=SH+EPS);
+  const packRot = forced ? false : inp.rot;
+  const bad = inp.parts.filter((p,pi)=>{
+    const o = orient[pi];
+    const fit = (o.w<=SW+EPS && o.h<=SH+EPS);
+    const fitR = packRot && (o.h<=SW+EPS && o.w<=SH+EPS);
     return !(fit||fitR);
   });
   if(bad.length) return {error:'Не помещается на лист: '+bad.map(p=>`${p.name} ${nf(p.len)}×${nf(p.wid)}`).join(', ')+
@@ -643,17 +664,25 @@ function optimize(inp){
     (Math.min(f.w%REMNANT_STEP, REMNANT_STEP-(f.w%REMNANT_STEP)) > 0.5) &&
     (Math.min(f.h%REMNANT_STEP, REMNANT_STEP-(f.h%REMNANT_STEP)) > 0.5);
   const preferClean = !inp.allowThin;
+  const isPlasma = inp.cutMethod === 'plasma';
+  // сколько отдельных кусков-остатков видно на карте (мелочь не считаем);
+  // для плазмы смежные куски склеиваются так же, как при отрисовке
+  const fragCount = sheets => sheets.reduce((s,r)=>{
+    const fr = collectFree(r);
+    return s + (isPlasma ? mergeFreeForDisplay(fr, inp.kerf) : fr)
+      .filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).length;
+  }, 0);
   let best=null;
   for(const sk of Object.keys(sorts)){
     const list = items.slice().sort(sorts[sk]);
     for(const rk of Object.keys(SPLIT_RULES)){
-      const sheets = runPack(list, SW, SH, inp.trim, inp.trim, inp.kerf, inp.rot, SPLIT_RULES[rk]);
+      const sheets = runPack(list, SW, SH, inp.trim, inp.trim, inp.kerf, packRot, SPLIT_RULES[rk]);
       if(!sheets) continue;
       const cuts = sheets.reduce((s,r)=>s+collectCuts(r).length,0);
       const lastFree = collectFree(sheets[sheets.length-1]);
       const remnant = lastFree.reduce((m,f)=>Math.max(m,f.w*f.h),0);
       const awkward = preferClean ? sheets.reduce((s,r)=>s+collectFree(r).filter(isAwkward).length,0) : 0;
-      const score = [sheets.length, awkward, -remnant, cuts];
+      const score = [sheets.length, awkward, fragCount(sheets), -remnant, cuts];
       if(!best || cmp(score,best.score)<0) best = {sheets, score, sk, rk, cuts};
     }
   }
@@ -678,6 +707,7 @@ function optimize(inp){
       usage: totalUsed/totalArea,
       waste: totalArea-totalUsed
     },
+    notRotated,
     meta: best.sk+'/'+best.rk
   };
 }
@@ -779,7 +809,7 @@ function svgSheet(res, sh, opt={}){
         s = `<text x="${it.x+it.w/2}" y="${it.y+it.h/2}" text-anchor="middle" dominant-baseline="central"
           font-size="${fs.toFixed(1)}" fill="var(--label)" font-family="${MONO}">#${it.idx}</text>`;
     }
-    if(it.rot){                                        // значок поворота на 90°
+    if(it.rot || it.forced){                           // значок поворота на 90°
       const rr = Math.min(FS*.7, it.w*.28, it.h*.28);
       if(rr >= FSMIN*.75) s += `<text x="${it.x+it.w-rr*.6}" y="${it.y+rr*.8}" text-anchor="middle"
         dominant-baseline="central" font-size="${rr.toFixed(1)}" fill="var(--faint)" font-family="${MONO}">⟳</text>`;
@@ -904,6 +934,7 @@ function render(){
     <div class="title-row">
       <h2>${esc(r.input.order || 'Карта раскроя')}</h2>
       <div class="acts">
+        <button class="btn ${r.input.forceRot?'on':''}" id="btnRotAll" aria-pressed="${!!r.input.forceRot}">⟳ Повернуть детали</button>
         <button class="btn" id="btnSave">+ Сохранить</button>
         <button class="btn dark" id="btnPrint">Печатать</button>
       </div>
@@ -952,12 +983,13 @@ function render(){
         </div>
         <div class="note">${firstCutHint(sh, r)}<br><br>
           <b>Параметры:</b> способ резки — ${isPlasma?'плазма':'гильотина'}; толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
-          поворот деталей ${r.input.rot?'разрешён':'запрещён'}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
+          поворот деталей ${r.input.forceRot?'принудительно на 90°':(r.input.rot?'разрешён':'запрещён')}${r.notRotated&&r.notRotated.length?` (не повернуты, не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
           ${isPlasma?'':'Все резы сквозные — раскрой выполним на гильотине.'}</div>
       </div>
     </div>`;
 
   $('#btnSave').onclick = saveCurrent;
+  $('#btnRotAll').onclick = () => { $('#forceRot').checked = !$('#forceRot').checked; calculate(); };
   $('#btnPrint').onclick = doPrint;
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{activeSheet=+b.dataset.s;render();});
   $('#ckCuts').onchange = drawMap; $('#ckRem').onchange = drawMap;
@@ -1023,6 +1055,7 @@ function newCutting(){
   const hasData = cur.order || cur.parts.length > 0;
   if(hasData && !confirm('Начать новый раскрой? Название заказа и список деталей очистятся (размер листа и параметры реза останутся).')) return;
   $('#orderName').value = '';
+  $('#forceRot').checked = false;
   $('#rows').innerHTML = ''; addRow(); refreshCount();
   $('#formErr').innerHTML = '';
   RES = null; activeSheet = 0;
