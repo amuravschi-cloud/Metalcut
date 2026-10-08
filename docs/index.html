@@ -314,7 +314,13 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
         </div>
       </label>
       <label class="chk"><input type="checkbox" id="allowRot" checked> Разрешить поворот деталей на 90°</label>
-      <label class="chk"><input type="checkbox" id="forceRot"> Повернуть все детали на 90° <em>(другой раскрой)</em></label>
+      <label class="f"><span>Положение деталей <em>длинная сторона…</em></span>
+        <div class="segmented" id="rotModeSeg">
+          <button type="button" class="on" data-v="auto">Авто</button>
+          <button type="button" data-v="h">Вдоль листа</button>
+          <button type="button" data-v="v">Поперёк</button>
+        </div>
+      </label>
       <label class="chk"><input type="checkbox" id="allowThin"> Разрешить остатки и детали менее 500 мм <em>(закладные)</em></label>
     </div>
 
@@ -414,7 +420,7 @@ function readForm(){
     kerf: Math.max(0, parseFloat($('#kerf').value)||0),
     trim: Math.max(0, parseFloat($('#trim').value)||0),
     rot: $('#allowRot').checked,
-    forceRot: $('#forceRot').checked,
+    rotMode: $('#rotModeSeg .on')?.dataset.v || 'auto',
     cutMethod: $('#cutMethodSeg .on')?.dataset.v || 'guillotine',
     allowThin: $('#allowThin').checked,
     parts
@@ -424,9 +430,12 @@ function fillForm(inp){
   $('#orderName').value = inp.order||''; $('#sheetL').value = inp.L; $('#sheetW').value = inp.W;
   $('#kerf').value = inp.kerf; $('#trim').value = inp.trim; $('#allowRot').checked = !!inp.rot;
   $('#allowThin').checked = !!inp.allowThin;
-  $('#forceRot').checked = !!inp.forceRot;
+  setRotMode(inp.rotMode || (inp.forceRot ? 'h' : 'auto'));
   setCutMethod(inp.cutMethod === 'plasma' ? 'plasma' : 'guillotine');
   $('#rows').innerHTML=''; (inp.parts||[]).forEach(addRow); if(!$('#rows').children.length) addRow();
+}
+function setRotMode(v){
+  document.querySelectorAll('#rotModeSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
 }
 function setCutMethod(v){
   document.querySelectorAll('#cutMethodSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
@@ -622,14 +631,23 @@ function optimize(inp){
   // фиксируется в этом положении (авто-поворот упаковщика выключается, иначе
   // он сам вернул бы детали в прежнее положение и раскрой не изменился бы).
   // Деталь, которая в повёрнутом виде на лист не влезает, остаётся как была.
-  const forced = !!inp.forceRot;
+  // Положение задаётся относительно ЛИСТА, а не введённых размеров:
+  // 'h' — длинная сторона детали вдоль длины листа, 'v' — поперёк.
+  const mode = inp.rotMode || (inp.forceRot ? 'h' : 'auto');
+  const forced = mode !== 'auto';
   const notRotated = [];
+  const fits = (w,h) => w<=SW+EPS && h<=SH+EPS;
   const orient = inp.parts.map(p=>{
-    if(forced){
-      if(p.wid<=SW+EPS && p.len<=SH+EPS) return {w:p.wid, h:p.len, forced:true};
-      notRotated.push(p.name);
+    if(!forced) return {w:p.len, h:p.wid, forced:false};
+    const big = Math.max(p.len,p.wid), small = Math.min(p.len,p.wid);
+    const want  = mode==='h' ? {w:big, h:small} : {w:small, h:big};
+    const other = mode==='h' ? {w:small, h:big} : {w:big, h:small};
+    let o = want;
+    if(!fits(o.w,o.h)){
+      if(fits(other.w,other.h)){ o = other; notRotated.push(p.name); }   // нужное положение не влезает
+      else o = {w:p.len, h:p.wid};                                        // не влезает никак — пусть скажет проверка ниже
     }
-    return {w:p.len, h:p.wid, forced:false};
+    return {w:o.w, h:o.h, forced:(o.w!==p.len)};   // значок ⟳, если положение отличается от введённого
   });
 
   // разворачиваем количества в отдельные экземпляры
@@ -906,6 +924,7 @@ function render(){
   if(!RES){ return; }
   const r = RES, t = r.totals, sh = r.sheets[activeSheet];
   const isPlasma = r.input.cutMethod === 'plasma';
+  const rotMode = r.input.rotMode || (r.input.forceRot ? 'h' : 'auto');
   const legend = r.input.parts.map((p,i)=>({
     ...p, color:PALETTE[i%PALETTE.length],
     placed: r.sheets.reduce((s,x)=>s+x.items.filter(it=>it.pid===i).length,0)
@@ -937,7 +956,7 @@ function render(){
     <div class="title-row">
       <h2>${esc(r.input.order || 'Карта раскроя')}</h2>
       <div class="acts">
-        <button class="btn ${r.input.forceRot?'on':''}" id="btnRotAll" aria-pressed="${!!r.input.forceRot}">⟳ Повернуть детали</button>
+        <button class="btn ${rotMode!=='auto'?'on':''}" id="btnRotAll" title="Переключает положение деталей: авто → вдоль листа → поперёк">⟳ ${({auto:'Повернуть детали',h:'Детали вдоль листа',v:'Детали поперёк'})[rotMode]}</button>
         <button class="btn" id="btnSave">+ Сохранить</button>
         <button class="btn dark" id="btnPrint">Печатать</button>
       </div>
@@ -986,13 +1005,16 @@ function render(){
         </div>
         <div class="note">${firstCutHint(sh, r)}<br><br>
           <b>Параметры:</b> способ резки — ${isPlasma?'плазма':'гильотина'}; толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
-          поворот деталей ${r.input.forceRot?'принудительно на 90°':(r.input.rot?'разрешён':'запрещён')}${r.notRotated&&r.notRotated.length?` (не повернуты, не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
+          положение деталей — ${rotMode==='h'?'принудительно, длинная сторона вдоль листа':rotMode==='v'?'принудительно, длинная сторона поперёк листа':(r.input.rot?'авто, поворот разрешён':'авто, поворот запрещён')}${r.notRotated&&r.notRotated.length?` (в нужном положении не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
           ${isPlasma?'':'Все резы сквозные — раскрой выполним на гильотине.'}</div>
       </div>
     </div>`;
 
   $('#btnSave').onclick = saveCurrent;
-  $('#btnRotAll').onclick = () => { $('#forceRot').checked = !$('#forceRot').checked; calculate(); };
+  $('#btnRotAll').onclick = () => {
+    const next = {auto:'h', h:'v', v:'auto'}[rotMode];
+    setRotMode(next); calculate();
+  };
   $('#btnPrint').onclick = doPrint;
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{activeSheet=+b.dataset.s;render();});
   $('#ckCuts').onchange = drawMap; $('#ckRem').onchange = drawMap;
@@ -1058,7 +1080,7 @@ function newCutting(){
   const hasData = cur.order || cur.parts.length > 0;
   if(hasData && !confirm('Начать новый раскрой? Название заказа и список деталей очистятся (размер листа и параметры реза останутся).')) return;
   $('#orderName').value = '';
-  $('#forceRot').checked = false;
+  setRotMode('auto');
   $('#rows').innerHTML = ''; addRow(); refreshCount();
   $('#formErr').innerHTML = '';
   RES = null; activeSheet = 0;
@@ -1294,6 +1316,7 @@ function applyVisionResult(){
     document.documentElement.dataset.theme = nx; localStorage.setItem(LS_THEME, nx);
   };
   $('#addRow').onclick = ()=>addRow();
+  $('#rotModeSeg').onclick = e => { const b = e.target.closest('button'); if(b) setRotMode(b.dataset.v); };
   $('#cutMethodSeg').onclick = e => { const b = e.target.closest('button'); if(b) setCutMethod(b.dataset.v); };
   $('#btnCalc').onclick = calculate;
   $('#photoInput').onchange = (e) => { const f = e.target.files[0]; if(f) recognizeSketch(f); e.target.value = ''; };
