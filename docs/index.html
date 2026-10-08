@@ -1029,7 +1029,7 @@ function render(){
     <div class="title-row">
       <h2>${esc(r.input.order || 'Карта раскроя')}</h2>
       <div class="acts">
-        <button class="btn ${r.input.forceOrient?'on':''}" id="btnRotAll" title="Развернуть все детали на 90° и заново уложить компактно. Ещё раз — вернуть назад.">⟳ Повернуть все детали</button>
+        <button class="btn ${r.input.forceOrient?'on':''}" id="btnRotAll" title="${r.input.forceOrient?'Вернуть раскладку, которую подобрала программа':'Развернуть все детали на 90° и заново уложить компактно'}">${r.input.forceOrient?'↺ Вернуть авто-раскладку':'⟳ Повернуть все детали'}</button>
         <button class="btn" id="btnSave">+ Сохранить</button>
         <button class="btn dark" id="btnPrint">Печатать</button>
       </div>
@@ -1078,7 +1078,7 @@ function render(){
         </div>
         <div class="note">${firstCutHint(sh, r)}<br><br>
           <b>Параметры:</b> способ резки — ${isPlasma?'плазма':'гильотина'}; толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
-          положение деталей — ${r.input.forceOrient?'повёрнуты вручную на 90° (обычный расчёт вернёт автоматический режим)':(r.input.rot?'авто, поворот разрешён':'авто, поворот запрещён')}${r.notRotated&&r.notRotated.length?` (в повёрнутом виде не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
+          положение деталей — ${r.input.forceOrient?'повёрнуты вручную на 90° (кнопка «Вернуть авто-раскладку» возвращает подбор программы)':(r.input.rot?'авто, поворот разрешён':'авто, поворот запрещён')}${r.notRotated&&r.notRotated.length?` (в повёрнутом виде не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
           ${isPlasma?'':'Все резы сквозные — раскрой выполним на гильотине.'}</div>
       </div>
     </div>`;
@@ -1147,11 +1147,13 @@ function calculate(opts={}){
   if(window.innerWidth>960) $('#result').scrollIntoView({block:'nearest'});
 }
 
-// Разворачивает все детали на 90° относительно того, как они лежат на карте
-// сейчас (а не относительно введённых размеров), и заново собирает
-// компактную раскладку. Повторное нажатие возвращает исходное положение.
+// Переключатель «авто ⇄ повёрнуто». Из авто: разворачивает все детали на 90°
+// относительно того, как они лежат на карте (а не относительно введённых
+// размеров) и заново собирает компактную раскладку. Из повёрнутого вида:
+// возвращает автоматическую раскладку.
 function rotateAll(){
   if(!RES) return;
+  if(FORCE){ FORCE = null; calculate({keep:true}); return; }
   const all = RES.sheets.flatMap(s=>s.items);
   FORCE = RES.input.parts.map((p,i)=>{
     const its = all.filter(it=>it.pid===i);
