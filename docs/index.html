@@ -314,13 +314,6 @@ body[data-tab="in"] .tabbar button:nth-child(1),body[data-tab="out"] .tabbar but
         </div>
       </label>
       <label class="chk"><input type="checkbox" id="allowRot" checked> Разрешить поворот деталей на 90°</label>
-      <label class="f"><span>Положение деталей <em>длинная сторона…</em></span>
-        <div class="segmented" id="rotModeSeg">
-          <button type="button" class="on" data-v="auto">Авто</button>
-          <button type="button" data-v="h">Вдоль листа</button>
-          <button type="button" data-v="v">Поперёк</button>
-        </div>
-      </label>
       <label class="chk"><input type="checkbox" id="allowThin"> Разрешить остатки и детали менее 500 мм <em>(закладные)</em></label>
     </div>
 
@@ -420,7 +413,6 @@ function readForm(){
     kerf: Math.max(0, parseFloat($('#kerf').value)||0),
     trim: Math.max(0, parseFloat($('#trim').value)||0),
     rot: $('#allowRot').checked,
-    rotMode: $('#rotModeSeg .on')?.dataset.v || 'auto',
     cutMethod: $('#cutMethodSeg .on')?.dataset.v || 'guillotine',
     allowThin: $('#allowThin').checked,
     parts
@@ -430,12 +422,8 @@ function fillForm(inp){
   $('#orderName').value = inp.order||''; $('#sheetL').value = inp.L; $('#sheetW').value = inp.W;
   $('#kerf').value = inp.kerf; $('#trim').value = inp.trim; $('#allowRot').checked = !!inp.rot;
   $('#allowThin').checked = !!inp.allowThin;
-  setRotMode(inp.rotMode || (inp.forceRot ? 'h' : 'auto'));
   setCutMethod(inp.cutMethod === 'plasma' ? 'plasma' : 'guillotine');
   $('#rows').innerHTML=''; (inp.parts||[]).forEach(addRow); if(!$('#rows').children.length) addRow();
-}
-function setRotMode(v){
-  document.querySelectorAll('#rotModeSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
 }
 function setCutMethod(v){
   document.querySelectorAll('#cutMethodSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
@@ -465,7 +453,10 @@ function leaves(n, out=[]){
   if(n.type==='split'){ leaves(n.c1,out); leaves(n.c2,out); } else out.push(n);
   return out;
 }
-function findSpot(root, it, rot){
+// pref='waste' — место с наименьшим отходом; pref='corner' — самое левое,
+// затем самое верхнее (блок деталей растёт столбцами от края листа и не
+// расползается по всей длине).
+function findSpot(root, it, rot, pref){
   let best=null;
   for(const n of leaves(root)){
     if(n.type!=='free') continue;
@@ -475,8 +466,16 @@ function findSpot(root, it, rot){
       if(pw > n.w+EPS || ph > n.h+EPS) continue;
       const waste = n.w*n.h - pw*ph;
       const short = Math.min(n.w-pw, n.h-ph);
-      if(!best || waste < best.waste-EPS || (Math.abs(waste-best.waste)<EPS && short < best.short))
-        best = {node:n, pw, ph, rot:r, waste, short};
+      let better;
+      if(!best) better = true;
+      else if(pref==='corner'){
+        const dx = n.x-best.node.x, dy = n.y-best.node.y;
+        better = dx < -EPS || (Math.abs(dx)<EPS && (dy < -EPS || (Math.abs(dy)<EPS &&
+          (waste < best.waste-EPS || (Math.abs(waste-best.waste)<EPS && short < best.short)))));
+      } else {
+        better = waste < best.waste-EPS || (Math.abs(waste-best.waste)<EPS && short < best.short);
+      }
+      if(better) best = {node:n, pw, ph, rot:r, waste, short};
     }
   }
   return best;
@@ -532,7 +531,7 @@ function collectFree(root){
 }
 
 /* один прогон: раскладываем весь список по листам */
-function runPack(items, SW, SH, ox, oy, k, rot, rule){
+function runPack(items, SW, SH, ox, oy, k, rot, rule, pref){
   const sheets = [];
   let rest = items.slice();
   let guard = 0;
@@ -542,7 +541,7 @@ function runPack(items, SW, SH, ox, oy, k, rot, rule){
     const next = [];
     let placed = 0;
     for(const it of rest){
-      const spot = findSpot(root, it, rot);
+      const spot = findSpot(root, it, rot, pref);
       if(spot){ place(spot.node, {...it, rot:spot.rot}, spot.pw, spot.ph, rule, k); placed++; }
       else next.push(it);
     }
@@ -623,51 +622,97 @@ function mergeFreeForDisplay(free, kerf){
   }
   return list;
 }
+// Самый большой пустой прямоугольник среди размещённых деталей. Границы
+// такого прямоугольника всегда совпадают с краями деталей или рабочей
+// области листа, поэтому перебираем только их.
+function largestEmptyRect(items, x0, y0, x1, y1){
+  const lefts = new Set([x0]), rights = new Set([x1]);
+  items.forEach(i=>{ lefts.add(i.x+i.w); rights.add(i.x); });
+  const Ls = [...lefts].filter(v=>v<x1-EPS).sort((a,b)=>a-b);
+  const Rs = [...rights].filter(v=>v>x0+EPS).sort((a,b)=>a-b);
+  let best = {x:x0, y:y0, w:0, h:0, area:0};
+  for(const l of Ls){
+    for(const r of Rs){
+      if(r-l <= EPS || (r-l)*(y1-y0) <= best.area) continue;
+      const ys = [];
+      for(const it of items) if(it.x < r-EPS && it.x+it.w > l+EPS) ys.push([it.y, it.y+it.h]);
+      ys.sort((a,b)=>a[0]-b[0]);
+      let cur = y0, gapY = y0, gapH = 0;
+      for(const [a,b] of ys){
+        if(a-cur > gapH){ gapH = a-cur; gapY = cur; }
+        if(b > cur) cur = b;
+      }
+      if(y1-cur > gapH){ gapH = y1-cur; gapY = cur; }
+      const area = (r-l)*gapH;
+      if(area > best.area) best = {x:l, y:gapY, w:r-l, h:gapH, area};
+    }
+  }
+  return best;
+}
+
+// Что считать «остатками» листа и какой из них самый крупный цельный кусок.
+// Гильотина: кусок физически отрезается по резам, значит это самый большой
+// свободный лист дерева раскладки. Плазма: режутся только контуры деталей,
+// поэтому цельным куском считается самый большой пустой прямоугольник.
+function sheetPieces(root, items, isPlasma, kerf, x0, y0, x1, y1){
+  const leavesFree = collectFree(root);
+  if(!isPlasma){
+    let big = {x:x0, y:y0, w:0, h:0, area:0};
+    leavesFree.forEach(f=>{ if(f.w*f.h > big.area) big = {...f, area:f.w*f.h}; });
+    return {display: leavesFree, big};
+  }
+  const R = largestEmptyRect(items, x0, y0, x1, y1);
+  const hits = f => Math.min(f.x+f.w, R.x+R.w) - Math.max(f.x, R.x) > EPS &&
+                    Math.min(f.y+f.h, R.y+R.h) - Math.max(f.y, R.y) > EPS;
+  const rest = mergeFreeForDisplay(leavesFree, kerf).filter(f=>!hits(f));
+  return {display: R.area>0 ? [{x:R.x, y:R.y, w:R.w, h:R.h}, ...rest] : rest, big:R};
+}
+
 function optimize(inp){
   const SW = inp.L - 2*inp.trim, SH = inp.W - 2*inp.trim;
   if(!(SW>0 && SH>0)) return {error:'Обрезка кромки больше размеров листа.'};
+  if(!inp.parts.length) return {error:'Добавьте хотя бы одну деталь с размерами и количеством.'};
 
-  // Принудительный поворот: каждая деталь кладётся повёрнутой на 90° и
-  // фиксируется в этом положении (авто-поворот упаковщика выключается, иначе
-  // он сам вернул бы детали в прежнее положение и раскрой не изменился бы).
-  // Деталь, которая в повёрнутом виде на лист не влезает, остаётся как была.
-  // Положение задаётся относительно ЛИСТА, а не введённых размеров:
-  // 'h' — длинная сторона детали вдоль длины листа, 'v' — поперёк.
-  const mode = inp.rotMode || (inp.forceRot ? 'h' : 'auto');
-  const forced = mode !== 'auto';
-  const notRotated = [];
+  const isPlasma = inp.cutMethod === 'plasma';
   const fits = (w,h) => w<=SW+EPS && h<=SH+EPS;
-  const orient = inp.parts.map(p=>{
-    if(!forced) return {w:p.len, h:p.wid, forced:false};
-    const big = Math.max(p.len,p.wid), small = Math.min(p.len,p.wid);
-    const want  = mode==='h' ? {w:big, h:small} : {w:small, h:big};
-    const other = mode==='h' ? {w:small, h:big} : {w:big, h:small};
-    let o = want;
-    if(!fits(o.w,o.h)){
-      if(fits(other.w,other.h)){ o = other; notRotated.push(p.name); }   // нужное положение не влезает
-      else o = {w:p.len, h:p.wid};                                        // не влезает никак — пусть скажет проверка ниже
-    }
-    return {w:o.w, h:o.h, forced:(o.w!==p.len)};   // значок ⟳, если положение отличается от введённого
-  });
-
-  // разворачиваем количества в отдельные экземпляры
-  const items = [];
-  inp.parts.forEach((p,pi)=>{
-    const o = orient[pi];
-    for(let q=0;q<p.qty;q++) items.push({pid:pi, name:p.name, w:o.w, h:o.h, area:p.len*p.wid, forced:o.forced, idx:items.length+1});
-  });
-  if(!items.length) return {error:'Добавьте хотя бы одну деталь с размерами и количеством.'};
 
   // проверка «в принципе помещается»
-  const packRot = forced ? false : inp.rot;
-  const bad = inp.parts.filter((p,pi)=>{
-    const o = orient[pi];
-    const fit = (o.w<=SW+EPS && o.h<=SH+EPS);
-    const fitR = packRot && (o.h<=SW+EPS && o.w<=SH+EPS);
-    return !(fit||fitR);
-  });
+  const bad = inp.parts.filter(p => !(fits(p.len,p.wid) || (inp.rot && fits(p.wid,p.len))));
   if(bad.length) return {error:'Не помещается на лист: '+bad.map(p=>`${p.name} ${nf(p.len)}×${nf(p.wid)}`).join(', ')+
     (inp.rot?'':'. Попробуйте разрешить поворот деталей.')};
+
+  // Варианты положения деталей. «Авто» — упаковщик сам поворачивает деталь
+  // под место. Остальные — каждому типу детали заранее задано положение
+  // (перебираются все сочетания), чтобы найти раскладку с самым большим
+  // цельным куском: на длинном листе выгодно ставить детали так, чтобы блок
+  // получился короче.
+  const variants = [{orient: inp.parts.map(p=>({w:p.len, h:p.wid})), rot: inp.rot}];
+  if(inp.rot){
+    const only = inp.parts.map(p => !fits(p.len,p.wid) ? {w:p.wid,h:p.len} : (!fits(p.wid,p.len) ? {w:p.len,h:p.wid} : null));
+    const flex = [];
+    inp.parts.forEach((p,i)=>{ if(p.len!==p.wid && !only[i]) flex.push(i); });
+    const pick = (i,swap) => swap ? {w:inp.parts[i].wid, h:inp.parts[i].len} : {w:inp.parts[i].len, h:inp.parts[i].wid};
+    const build = swapOf => inp.parts.map((p,i)=> only[i] || pick(i, flex.includes(i) && swapOf(i)));
+    if(flex.length){
+      if(flex.length <= 5){
+        for(let m=0; m<(1<<flex.length); m++)
+          variants.push({orient: build(i=>(m>>flex.indexOf(i))&1), rot:false});
+      } else {
+        variants.push(
+          {orient: build(()=>false), rot:false}, {orient: build(()=>true), rot:false},
+          {orient: build(i=>inp.parts[i].len<inp.parts[i].wid), rot:false},
+          {orient: build(i=>inp.parts[i].len>inp.parts[i].wid), rot:false});
+      }
+    }
+  }
+  const makeItems = orient => {
+    const items = [];
+    inp.parts.forEach((p,pi)=>{
+      const o = orient[pi];
+      for(let q=0;q<p.qty;q++) items.push({pid:pi, name:p.name, w:o.w, h:o.h, area:p.len*p.wid, forced:(o.w!==p.len), idx:items.length+1});
+    });
+    return items;
+  };
 
   const sorts = {
     area:(a,b)=> b.area-a.area || Math.max(b.w,b.h)-Math.max(a.w,a.h),
@@ -676,44 +721,55 @@ function optimize(inp){
     width:(a,b)=> b.w-a.w || b.h-a.h
   };
   // "Неопрятный" остаток — кусок площадью от полуметра, у которого НИ одна
-  // сторона не кратна 500 мм (значит его неудобно завести на склад как
-  // мерный обрезок). Среди раскладок с ОДИНАКОВЫМ числом листов алгоритм
-  // предпочитает вариант с меньшим числом таких кусков — но никогда не
-  // жертвует ради этого количеством листов или расходом металла, это
-  // только выбор среди уже одинаково экономных вариантов.
+  // сторона не кратна 500 мм (неудобно завести на склад как мерный обрезок).
+  // Это лишь второстепенный критерий выбора среди раскладок с одинаково
+  // большим цельным куском.
   const isAwkward = f => (f.w*f.h >= 250000) &&
     (Math.min(f.w%REMNANT_STEP, REMNANT_STEP-(f.w%REMNANT_STEP)) > 0.5) &&
     (Math.min(f.h%REMNANT_STEP, REMNANT_STEP-(f.h%REMNANT_STEP)) > 0.5);
   const preferClean = !inp.allowThin;
-  const isPlasma = inp.cutMethod === 'plasma';
-  // сколько отдельных кусков-остатков видно на карте (мелочь не считаем);
-  // для плазмы смежные куски склеиваются так же, как при отрисовке
-  const fragCount = sheets => sheets.reduce((s,r)=>{
-    const fr = collectFree(r);
-    return s + (isPlasma ? mergeFreeForDisplay(fr, inp.kerf) : fr)
-      .filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).length;
-  }, 0);
-  let best=null;
-  for(const sk of Object.keys(sorts)){
-    const list = items.slice().sort(sorts[sk]);
-    for(const rk of Object.keys(SPLIT_RULES)){
-      const sheets = runPack(list, SW, SH, inp.trim, inp.trim, inp.kerf, packRot, SPLIT_RULES[rk]);
-      if(!sheets) continue;
-      const cuts = sheets.reduce((s,r)=>s+collectCuts(r).length,0);
-      const lastFree = collectFree(sheets[sheets.length-1]);
-      const remnant = lastFree.reduce((m,f)=>Math.max(m,f.w*f.h),0);
-      const awkward = preferClean ? sheets.reduce((s,r)=>s+collectFree(r).filter(isAwkward).length,0) : 0;
-      const score = [sheets.length, awkward, fragCount(sheets), -remnant, cuts];
-      if(!best || cmp(score,best.score)<0) best = {sheets, score, sk, rk, cuts};
+  const visible = f => f.w>=150 && f.h>=150 && f.w*f.h>=6e4;
+  const x0 = inp.trim, y0 = inp.trim, x1 = inp.trim+SW, y1 = inp.trim+SH;
+  const bucketArea = SW*SH*0.01;     // вариант считается «одинаково хорошим», если кусок отличается меньше чем на 1% листа
+
+  // Главный критерий: число листов. Затем — размер самого большого цельного
+  // куска (чтобы осталось как можно больше металла для следующей работы),
+  // затем аккуратность остатков, их число и число резов.
+  let best = null;
+  const t0 = performance.now();
+  search:
+  for(const v of variants){
+    const items = makeItems(v.orient);
+    for(const pref of ['corner','waste']){
+      for(const sk of Object.keys(sorts)){
+        const list = items.slice().sort(sorts[sk]);
+        for(const rk of Object.keys(SPLIT_RULES)){
+          if(performance.now()-t0 > 3000) break search;
+          const roots = runPack(list, SW, SH, x0, y0, inp.kerf, v.rot, SPLIT_RULES[rk], pref);
+          if(!roots) continue;
+          if(best && roots.length > best.score[0]) continue;
+          let big = null, frag = 0, awk = 0, cuts = 0;
+          const pieces = roots.map(root=>{
+            const pc = sheetPieces(root, collectItems(root), isPlasma, inp.kerf, x0, y0, x1, y1);
+            if(!big || pc.big.area > big.area) big = pc.big;
+            frag += pc.display.filter(visible).length;
+            if(preferClean) awk += pc.display.filter(isAwkward).length;
+            cuts += collectCuts(root).length;
+            return pc;
+          });
+          const score = [roots.length, -Math.round(big.area/bucketArea), -Math.round(Math.min(big.w,big.h)/100), awk, frag, -big.area, cuts];
+          if(!best || cmp(score,best.score)<0) best = {roots, pieces, big, score, cuts, key:`${pref}/${sk}/${rk}`};
+        }
+      }
     }
   }
   if(!best) return {error:'Не удалось разместить детали. Проверьте размеры.'};
 
-  const sheets = best.sheets.map((root,i)=>{
+  const sheets = best.roots.map((root,i)=>{
     const its = collectItems(root), cuts = collectCuts(root), free = collectFree(root);
     const used = its.reduce((s,t)=>s+t.w*t.h,0);
     const cutLen = plasmaCutLength(its, inp.L, inp.W);
-    return {i:i+1, root, items:its, cuts, free, used, usage: used/(inp.L*inp.W), cutLen};
+    return {i:i+1, root, items:its, cuts, free, display:best.pieces[i].display, big:best.pieces[i].big, used, usage: used/(inp.L*inp.W), cutLen};
   });
   const totalUsed = sheets.reduce((s,x)=>s+x.used,0);
   const totalArea = sheets.length*inp.L*inp.W;
@@ -721,15 +777,15 @@ function optimize(inp){
     input: inp, sheets,
     totals:{
       sheets: sheets.length,
-      items: items.length,
+      items: sheets.reduce((s,x)=>s+x.items.length,0),
       cuts: sheets.reduce((s,x)=>s+x.cuts.length,0),
       cutLen: sheets.reduce((s,x)=>s+x.cutLen,0),
       used: totalUsed, area: totalArea,
       usage: totalUsed/totalArea,
-      waste: totalArea-totalUsed
+      waste: totalArea-totalUsed,
+      big: best.big
     },
-    notRotated,
-    meta: best.sk+'/'+best.rk
+    meta: best.key
   };
 }
 const cmp = (a,b)=>{ for(let i=0;i<a.length;i++){ if(a[i]!==b[i]) return a[i]<b[i]?-1:1; } return 0; };
@@ -802,7 +858,7 @@ function svgSheet(res, sh, opt={}){
 
   // деловой остаток (для плазмы — со слиянием кусков, разделённых только зазором на рез)
   if(opt.remnant!==false){
-    const freeForShow = res.input.cutMethod==='plasma' ? mergeFreeForDisplay(sh.free, res.input.kerf) : sh.free;
+    const freeForShow = sh.display || sh.free;
     freeForShow.filter(f=>f.w>=150 && f.h>=150 && f.w*f.h>=6e4).forEach(f=>{
       g += `<rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="none" stroke="var(--edge)"
         stroke-width="${sw}" stroke-dasharray="${sw*6} ${sw*5}"/>`;
@@ -924,7 +980,6 @@ function render(){
   if(!RES){ return; }
   const r = RES, t = r.totals, sh = r.sheets[activeSheet];
   const isPlasma = r.input.cutMethod === 'plasma';
-  const rotMode = r.input.rotMode || (r.input.forceRot ? 'h' : 'auto');
   const legend = r.input.parts.map((p,i)=>({
     ...p, color:PALETTE[i%PALETTE.length],
     placed: r.sheets.reduce((s,x)=>s+x.items.filter(it=>it.pid===i).length,0)
@@ -956,7 +1011,6 @@ function render(){
     <div class="title-row">
       <h2>${esc(r.input.order || 'Карта раскроя')}</h2>
       <div class="acts">
-        <button class="btn ${rotMode!=='auto'?'on':''}" id="btnRotAll" title="Переключает положение деталей: авто → вдоль листа → поперёк">⟳ ${({auto:'Повернуть детали',h:'Детали вдоль листа',v:'Детали поперёк'})[rotMode]}</button>
         <button class="btn" id="btnSave">+ Сохранить</button>
         <button class="btn dark" id="btnPrint">Печатать</button>
       </div>
@@ -969,7 +1023,7 @@ function render(){
         <div class="s">${nf(r.input.L)} × ${nf(r.input.W)} мм</div></div>
       <div class="stat"><div class="k">Деталей</div><div class="v">${t.items}</div><div class="s">все размещены</div></div>
       ${methodStat}
-      <div class="stat"><div class="k">Отход</div><div class="v">${nf((1-t.usage)*100,2)}%</div><div class="s">${m2(t.waste)}</div></div>
+      <div class="stat"><div class="k">Отход</div><div class="v">${nf((1-t.usage)*100,2)}%</div><div class="s">${m2(t.waste)}${t.big && t.big.area>0 ? ` · целый кусок ${nf(t.big.w)}×${nf(t.big.h)}` : ''}</div></div>
     </div>
 
     ${r.sheets.length>1 ? `<div class="tabs">${r.sheets.map((s,i)=>
@@ -1005,16 +1059,12 @@ function render(){
         </div>
         <div class="note">${firstCutHint(sh, r)}<br><br>
           <b>Параметры:</b> способ резки — ${isPlasma?'плазма':'гильотина'}; толщина реза ${nf(r.input.kerf,1)} мм${r.input.trim?`, обрезка кромки ${nf(r.input.trim)} мм`:''},
-          положение деталей — ${rotMode==='h'?'принудительно, длинная сторона вдоль листа':rotMode==='v'?'принудительно, длинная сторона поперёк листа':(r.input.rot?'авто, поворот разрешён':'авто, поворот запрещён')}${r.notRotated&&r.notRotated.length?` (в нужном положении не помещаются на лист: ${esc(r.notRotated.join(', '))})`:''}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
+          поворот деталей ${r.input.rot?'разрешён':'запрещён'}. Деловой остаток — ${r.input.allowThin?'без предпочтения по размеру':'по возможности кратен 500 мм, без потери материала'}.
           ${isPlasma?'':'Все резы сквозные — раскрой выполним на гильотине.'}</div>
       </div>
     </div>`;
 
   $('#btnSave').onclick = saveCurrent;
-  $('#btnRotAll').onclick = () => {
-    const next = {auto:'h', h:'v', v:'auto'}[rotMode];
-    setRotMode(next); calculate();
-  };
   $('#btnPrint').onclick = doPrint;
   document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{activeSheet=+b.dataset.s;render();});
   $('#ckCuts').onchange = drawMap; $('#ckRem').onchange = drawMap;
@@ -1080,7 +1130,6 @@ function newCutting(){
   const hasData = cur.order || cur.parts.length > 0;
   if(hasData && !confirm('Начать новый раскрой? Название заказа и список деталей очистятся (размер листа и параметры реза останутся).')) return;
   $('#orderName').value = '';
-  setRotMode('auto');
   $('#rows').innerHTML = ''; addRow(); refreshCount();
   $('#formErr').innerHTML = '';
   RES = null; activeSheet = 0;
@@ -1316,7 +1365,6 @@ function applyVisionResult(){
     document.documentElement.dataset.theme = nx; localStorage.setItem(LS_THEME, nx);
   };
   $('#addRow').onclick = ()=>addRow();
-  $('#rotModeSeg').onclick = e => { const b = e.target.closest('button'); if(b) setRotMode(b.dataset.v); };
   $('#cutMethodSeg').onclick = e => { const b = e.target.closest('button'); if(b) setCutMethod(b.dataset.v); };
   $('#btnCalc').onclick = calculate;
   $('#photoInput').onchange = (e) => { const f = e.target.files[0]; if(f) recognizeSketch(f); e.target.value = ''; };
